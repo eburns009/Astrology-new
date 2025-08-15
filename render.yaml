@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: astrology-app
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app -b 0.0.0.0:8000
+    envVars:
+      - key: GEONAMES_USERNAME
+        value: newastologyemerging
+    autoDeploy: true
