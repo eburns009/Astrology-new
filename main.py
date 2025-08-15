@@ -1,4 +1,5 @@
 from flask import Flask, request, render_template_string, url_for
+import os
 import datetime
 from zoneinfo import ZoneInfo
 import requests
@@ -6,9 +7,13 @@ import swisseph as swe
 
 app = Flask(__name__)
 
-# ---------- CONFIG ----------
-GEONAMES_USERNAME = "newastologyemerging"
-DEFAULT_FB_EXTRA_OFFSET_DEG = 0.2103  # set 0.0 for pure Swiss F/B
+# ------------------ CONFIG ------------------
+# Read GeoNames username from env var when available; fallback to your default
+GEONAMES_USERNAME = os.getenv("GEONAMES_USERNAME", "newastologyemerging")
+# Free tier requires HTTP, not HTTPS
+GEONAMES_BASE = "http://api.geonames.org"
+# Set to 0.0 for pure Swiss Fagan/Bradley; keep small offset if you must match an external SVP flavor
+DEFAULT_FB_EXTRA_OFFSET_DEG = 0.2103
 
 PLANETS = [
     ("Sun", swe.SUN), ("Moon", swe.MOON), ("Mercury", swe.MERCURY),
@@ -37,6 +42,7 @@ HTML = """
   .success{background:#f5fff6;border-color:#cfe9d1}
   ul{margin:.5rem 0 .25rem 1.25rem}
   form.inline{display:inline}
+  .err{color:#b00020}
 </style>
 </head>
 <body>
@@ -60,16 +66,20 @@ HTML = """
       <ul>
         {% for c in city_results %}
           <li>
-            {{ c["name"] }}{% if c["adminName1"] %}, {{ c["adminName1"] }}{% endif %}, {{ c["countryName"] }}
-            — lat {{ c["lat"] }}, lon {{ c["lng"] }}
-            <form method="POST" action="{{ url_for('select_city') }}" class="inline">
-              <input type="hidden" name="name" value="{{ c['name'] }}">
-              <input type="hidden" name="adminName1" value="{{ c.get('adminName1','') }}">
-              <input type="hidden" name="countryName" value="{{ c.get('countryName','') }}">
-              <input type="hidden" name="lat" value="{{ c['lat'] }}">
-              <input type="hidden" name="lng" value="{{ c['lng'] }}">
-              <button type="submit">Use this</button>
-            </form>
+            <span class="{% if not c.get('_ok') %}err{% endif %}">
+              {{ c["name"] }}{% if c.get("adminName1") %}, {{ c["adminName1"] }}{% endif %}{% if c.get("countryName") %}, {{ c["countryName"] }}{% endif %}
+            </span>
+            {% if c.get("_ok") %}
+              — lat {{ c["lat"] }}, lon {{ c["lng"] }}
+              <form method="POST" action="{{ url_for('select_city') }}" class="inline">
+                <input type="hidden" name="name" value="{{ c['name'] }}">
+                <input type="hidden" name="adminName1" value="{{ c.get('adminName1','') }}">
+                <input type="hidden" name="countryName" value="{{ c.get('countryName','') }}">
+                <input type="hidden" name="lat" value="{{ c['lat'] }}">
+                <input type="hidden" name="lng" value="{{ c['lng'] }}">
+                <button type="submit">Use this</button>
+              </form>
+            {% endif %}
           </li>
         {% endfor %}
       </ul>
@@ -105,11 +115,14 @@ HTML = """
       <input name="fb_offset" value="{{ fb_offset if fb_offset is not none else '0.2103' }}">
     </div>
 
-    <!-- hidden lat/lon if chosen -->
     <input type="hidden" name="lat" value="{{ selected_city['lat'] if selected_city else '' }}">
     <input type="hidden" name="lng" value="{{ selected_city['lng'] if selected_city else '' }}">
     <button type="submit">Compute</button>
   </form>
+
+  {% if page_error %}
+    <p class="err">{{ page_error }}</p>
+  {% endif %}
 
   {% if results %}
     <p class="muted">Local {{ local_str }} ({{ tzid }}) → UTC {{ utc_str }} • JD {{ jd }}
@@ -133,37 +146,57 @@ HTML = """
 </html>
 """
 
-def geonames_search(q: str):
-    """Search cities via GeoNames."""
-    url = "http://api.geonames.org/searchJSON"
+# ------------------ GeoNames helpers ------------------
+class GeoNamesError(RuntimeError):
+    pass
+
+def _check_geonames_status(json_obj):
+    st = json_obj.get("status")
+    if st:
+        msg = st.get("message", "GeoNames error")
+        code = st.get("value", "")
+        raise GeoNamesError(f"{msg} (status {code})")
+
+def geonames_search(q: str, country: str | None = None):
+    url = f"{GEONAMES_BASE}/searchJSON"
     params = {
-        "q": q, "maxRows": 10, "username": GEONAMES_USERNAME,
-        "featureClass": "P", "orderby": "relevance"
+        "q": q,
+        "maxRows": 10,
+        "username": GEONAMES_USERNAME,
+        "featureClass": "P",
+        "orderby": "relevance",
     }
+    if country:
+        params["country"] = country
     r = requests.get(url, params=params, timeout=12)
     r.raise_for_status()
     data = r.json()
-    out = []
-    for g in data.get("geonames", []):
-        out.append({
+    _check_geonames_status(data)
+    return [
+        {
             "name": g.get("name", ""),
             "countryName": g.get("countryName", ""),
             "adminName1": g.get("adminName1", ""),
             "lat": str(g.get("lat")),
             "lng": str(g.get("lng")),
-        })
-    return out
+            "_ok": True,
+        }
+        for g in data.get("geonames", [])
+    ]
 
 def geonames_timezone(lat: float, lng: float) -> str:
-    """Get IANA timezone for coordinates via GeoNames timezone API."""
-    url = "http://api.geonames.org/timezoneJSON"
+    url = f"{GEONAMES_BASE}/timezoneJSON"
     params = {"lat": lat, "lng": lng, "username": GEONAMES_USERNAME}
     r = requests.get(url, params=params, timeout=12)
     r.raise_for_status()
-    tzid = r.json().get("timezoneId")
+    data = r.json()
+    _check_geonames_status(data)
+    tzid = data.get("timezoneId")
     if not tzid:
-        raise ValueError("No timezoneId returned")
+        raise GeoNamesError("timezoneId missing from GeoNames")
     return tzid
+
+# ------------------ Utilities ------------------
 
 def fmt_zodiac(deg: float) -> str:
     signs = ["Aries","Taurus","Gemini","Cancer","Leo","Virgo",
@@ -181,125 +214,147 @@ def fmt_zodiac(deg: float) -> str:
         m = 0; d += 1
     return f"{d:02d}°{m:02d}'{s:02d}\" {signs[si]}"
 
+# ------------------ Routes ------------------
 @app.route("/", methods=["GET","POST"])
 def index():
     q = request.args.get("q", "").strip() if request.method == "GET" else ""
     action = request.args.get("action") if request.method == "GET" else None
+
     city_results = None
     selected_city = None
     results = None
-    results_meta = {}
+    page_error = None
+
     date_val = time_val = tzid = None
     sidereal = False
     fb_offset_val = None
 
-    # Handle city search
+    # City search
     if request.method == "GET" and action == "search" and q:
         try:
-            city_results = geonames_search(q)
+            hint = "US" if any(tag in q.upper() for tag in [", KY", ", USA", " USA"]) else None
+            city_results = geonames_search(q, country=hint)
         except Exception as e:
-            city_results = [{"name":"Error","countryName":str(e),"adminName1":"","lat":"","lng":""}]
+            city_results = [{
+                "name": f"GeoNames error: {e}",
+                "countryName": "", "adminName1": "", "lat": "", "lng": "",
+                "_ok": False,
+            }]
 
     if request.method == "POST":
-        date_val = (request.form.get("date") or "").strip()
-        time_val = (request.form.get("time") or "").strip()
-        tzid = (request.form.get("tzid") or "UTC").strip()
-        sidereal = (request.form.get("sidereal") == "fb")
-
-        # offset
         try:
-            fb_offset_val = float((request.form.get("fb_offset") or "").strip())
-        except Exception:
-            fb_offset_val = DEFAULT_FB_EXTRA_OFFSET_DEG
-
-        # if hidden lat/lon present, try timezone lookup when tz missing/placeholder
-        lat = request.form.get("lat")
-        lng = request.form.get("lng")
-        if (not tzid or tzid.upper() == "AUTO") and lat and lng:
+            date_val = (request.form.get("date") or "").strip()
+            time_val = (request.form.get("time") or "").strip()
+            tzid = (request.form.get("tzid") or "UTC").strip()
+            sidereal = (request.form.get("sidereal") == "fb")
             try:
-                tzid = geonames_timezone(float(lat), float(lng))
+                fb_offset_val = float((request.form.get("fb_offset") or "").strip())
             except Exception:
-                tzid = "UTC"
+                fb_offset_val = DEFAULT_FB_EXTRA_OFFSET_DEG
 
-        # Local -> UTC
-        local_dt = datetime.datetime.strptime(f"{date_val} {time_val}", "%Y-%m-%d %H:%M")
-        try:
-            tz = ZoneInfo(tzid)
-        except Exception:
-            tz = ZoneInfo("UTC"); tzid = "UTC"
-        local_dt = local_dt.replace(tzinfo=tz)
-        utc_dt = local_dt.astimezone(datetime.timezone.utc)
+            # If hidden lat/lon present and tzid missing/AUTO, try GeoNames timezone
+            lat_raw = request.form.get("lat")
+            lng_raw = request.form.get("lng")
+            if (not tzid or tzid.upper() == "AUTO") and lat_raw and lng_raw:
+                try:
+                    tzid = geonames_timezone(float(lat_raw), float(lng_raw))
+                except Exception:
+                    tzid = "UTC"
 
-        # JD (UT)
-        hour_dec = utc_dt.hour + utc_dt.minute/60 + utc_dt.second/3600
-        jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, hour_dec)
+            # Local -> UTC
+            local_dt = datetime.datetime.strptime(f"{date_val} {time_val}", "%Y-%m-%d %H:%M")
+            try:
+                tz = ZoneInfo(tzid)
+            except Exception:
+                tz = ZoneInfo("UTC"); tzid = "UTC"
+            local_dt = local_dt.replace(tzinfo=tz)
+            utc_dt = local_dt.astimezone(datetime.timezone.utc)
 
-        # Ayanamsa
-        if sidereal:
-            swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
-            ayan = swe.get_ayanamsa_ut(jd) + fb_offset_val
-            results_meta["ayan_used"] = f"{ayan:.6f}"
-        else:
-            ayan = 0.0
+            # JD (UT)
+            hour_dec = utc_dt.hour + utc_dt.minute/60 + utc_dt.second/3600
+            jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, hour_dec)
 
-        rows = []
-        for name, code in PLANETS:
-            lon, latp, dist = swe.calc_ut(jd, code)[:3]
+            # Ayanamsa
             if sidereal:
-                sid = (lon - ayan) % 360.0
-                rows.append(type("R", (), {
-                    "name": name, "trop": f"{lon:.6f}", "sid": f"{sid:.6f}", "sign": fmt_zodiac(sid)
-                }))
+                swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
+                ayan = swe.get_ayanamsa_ut(jd) + fb_offset_val
+                ayan_used = f"{ayan:.6f}"
             else:
-                rows.append(type("R", (), {"name": name, "trop": f"{lon:.6f}"}))
+                ayan = 0.0
+                ayan_used = None
 
-        results = rows
-        results_meta.update({
-            "tzid": tzid,
-            "local_str": local_dt.strftime("%Y-%m-%d %H:%M"),
-            "utc_str": utc_dt.strftime("%Y-%m-%d %H:%M"),
-            "jd": f"{jd:.5f}",
-        })
+            rows = []
+            for name, code in PLANETS:
+                lon, latp, dist = swe.calc_ut(jd, code)[:3]
+                if sidereal:
+                    sid = (lon - ayan) % 360.0
+                    rows.append(type("R", (), {
+                        "name": name, "trop": f"{lon:.6f}", "sid": f"{sid:.6f}", "sign": fmt_zodiac(sid)
+                    }))
+                else:
+                    rows.append(type("R", (), {"name": name, "trop": f"{lon:.6f}"}))
 
-        return render_template_string(
-            HTML,
-            q=None, city_results=None, selected_city=selected_city,
-            results=results, date=date_val, time=time_val, tzid=tzid,
-            sidereal=sidereal, fb_offset=fb_offset_val,
-            local_str=results_meta["local_str"], utc_str=results_meta["utc_str"],
-            jd=results_meta["jd"], ayan_used=results_meta.get("ayan_used")
-        )
+            results = rows
+            return render_template_string(
+                HTML,
+                q=None, city_results=None, selected_city=selected_city,
+                results=results, date=date_val, time=time_val, tzid=tzid,
+                sidereal=sidereal, fb_offset=fb_offset_val,
+                local_str=local_dt.strftime("%Y-%m-%d %H:%M"),
+                utc_str=utc_dt.strftime("%Y-%m-%d %H:%M"),
+                jd=f"{jd:.5f}", ayan_used=ayan_used,
+                page_error=None
+            )
+        except Exception as e:
+            page_error = f"Input error: {e}"
 
-    # GET default (prefill with your birth data)
+    # Default GET view
     return render_template_string(
         HTML,
         q=q, city_results=city_results, selected_city=selected_city,
         results=None, date="1962-07-02", time="23:33", tzid="America/New_York",
-        sidereal=True, fb_offset=DEFAULT_FB_EXTRA_OFFSET_DEG
+        sidereal=True, fb_offset=DEFAULT_FB_EXTRA_OFFSET_DEG,
+        local_str="", utc_str="", jd="", ayan_used=None, page_error=page_error
     )
 
 @app.route("/select_city", methods=["POST"])
 def select_city():
-    name = request.form.get("name","")
-    admin = request.form.get("adminName1","")
-    country = request.form.get("countryName","")
-    lat = float(request.form.get("lat"))
-    lng = float(request.form.get("lng"))
     try:
-        tzid = geonames_timezone(lat, lng)
-    except Exception:
-        tzid = "UTC"
-    selected = {
-        "label": f"{name}{', ' + admin if admin else ''}, {country}",
-        "lat": lat, "lng": lng, "tzid": tzid
-    }
-    # Re-show main page with selection stored
-    return render_template_string(
-        HTML,
-        q=None, city_results=None, selected_city=selected,
-        results=None, date="1962-07-02", time="23:33",
-        tzid=tzid, sidereal=True, fb_offset=DEFAULT_FB_EXTRA_OFFSET_DEG
-    )
+        name = request.form.get("name", "")
+        admin = request.form.get("adminName1", "")
+        country = request.form.get("countryName", "")
+        lat_raw = (request.form.get("lat") or "").strip()
+        lng_raw = (request.form.get("lng") or "").strip()
+        if not lat_raw or not lng_raw:
+            raise ValueError("Missing lat/lon from selection")
+
+        lat = float(lat_raw); lng = float(lng_raw)
+        try:
+            tzid = geonames_timezone(lat, lng)
+        except Exception:
+            tzid = "UTC"
+
+        selected = {
+            "label": f"{name}{', ' + admin if admin else ''}{', ' + country if country else ''}",
+            "lat": lat, "lng": lng, "tzid": tzid
+        }
+        return render_template_string(
+            HTML,
+            q=None, city_results=None, selected_city=selected,
+            results=None, date="1962-07-02", time="23:33",
+            tzid=tzid, sidereal=True, fb_offset=DEFAULT_FB_EXTRA_OFFSET_DEG,
+            local_str="", utc_str="", jd="", ayan_used=None, page_error=None
+        )
+    except Exception as e:
+        err_row = [{"name": f"Selection error: {e}", "countryName":"", "adminName1":"", "lat":"", "lng":"", "_ok": False}]
+        return render_template_string(
+            HTML,
+            q=None, city_results=err_row, selected_city=None,
+            results=None, date="1962-07-02", time="23:33",
+            tzid="America/New_York", sidereal=True, fb_offset=DEFAULT_FB_EXTRA_OFFSET_DEG,
+            local_str="", utc_str="", jd="", ayan_used=None, page_error=None
+        )
 
 if __name__ == "__main__":
+    # Bind to 0.0.0.0:8000 for Render/Docker
     app.run(host="0.0.0.0", port=8000)
