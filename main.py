@@ -8,12 +8,9 @@ import swisseph as swe
 app = Flask(__name__)
 
 # ------------------ CONFIG ------------------
-# Read GeoNames username from env var when available; fallback to your default
 GEONAMES_USERNAME = os.getenv("GEONAMES_USERNAME", "newastologyemerging")
-# Free tier requires HTTP, not HTTPS
-GEONAMES_BASE = "http://api.geonames.org"
-# Set to 0.0 for pure Swiss Fagan/Bradley; keep small offset if you must match an external SVP flavor
-DEFAULT_FB_EXTRA_OFFSET_DEG = 0.2103
+GEONAMES_BASE = "http://api.geonames.org"  # Free tier uses HTTP
+DEFAULT_FB_EXTRA_OFFSET_DEG = 0.2103  # set to 0.0 for pure Swiss F/B
 
 PLANETS = [
     ("Sun", swe.SUN), ("Moon", swe.MOON), ("Mercury", swe.MERCURY),
@@ -66,9 +63,7 @@ HTML = """
       <ul>
         {% for c in city_results %}
           <li>
-            <span class="{% if not c.get('_ok') %}err{% endif %}">
-              {{ c["name"] }}{% if c.get("adminName1") %}, {{ c["adminName1"] }}{% endif %}{% if c.get("countryName") %}, {{ c["countryName"] }}{% endif %}
-            </span>
+            <span class="{% if not c.get('_ok') %}err{% endif %}">{{ c["name"] }}{% if c.get("adminName1") %}, {{ c["adminName1"] }}{% endif %}{% if c.get("countryName") %}, {{ c["countryName"] }}{% endif %}</span>
             {% if c.get("_ok") %}
               — lat {{ c["lat"] }}, lon {{ c["lng"] }}
               <form method="POST" action="{{ url_for('select_city') }}" class="inline">
@@ -125,9 +120,7 @@ HTML = """
   {% endif %}
 
   {% if results %}
-    <p class="muted">Local {{ local_str }} ({{ tzid }}) → UTC {{ utc_str }} • JD {{ jd }}
-    {% if sidereal %} • F/B ayanāṃśa used (incl. offset): {{ ayan_used }}°{% endif %}</p>
-
+    <p class="muted">Local {{ local_str }} ({{ tzid }}) → UTC {{ utc_str }} • JD {{ jd }}{% if sidereal %} • F/B ayanāṃśa used (incl. offset): {{ ayan_used }}°{% endif %}</p>
     <table>
       <tr>
         <th>Body</th><th>Tropical (°)</th>
@@ -285,7 +278,11 @@ def index():
 
             rows = []
             for name, code in PLANETS:
-                lon, latp, dist = swe.calc_ut(jd, code)[:3]
+                # --- FIX: robust handling of pyswisseph return shape ---
+                res = swe.calc_ut(jd, code)  # -> ((lon, lat, dist, ...), retflag)
+                pos = res[0] if isinstance(res[0], (list, tuple)) else res
+                lon, latp, dist = pos[0], pos[1], pos[2]
+
                 if sidereal:
                     sid = (lon - ayan) % 360.0
                     rows.append(type("R", (), {
@@ -356,5 +353,4 @@ def select_city():
         )
 
 if __name__ == "__main__":
-    # Bind to 0.0.0.0:8000 for Render/Docker
     app.run(host="0.0.0.0", port=8000)
