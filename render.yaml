@@ -4,8 +4,11 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app -b 0.0.0.0:8000
-    envVars:
-      - key: GEONAMES_USERNAME
-        value: newastologyemerging
+    startCommand: gunicorn main:app -b 0.0.0.0:8000 --workers 2 --threads 4 --timeout 120
     autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Optional if you use GeoNames search:
+      # - key: GEONAMES_USERNAME
+      #   value: newastologyemerging
