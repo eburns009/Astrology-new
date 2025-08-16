@@ -1,265 +1,154 @@
-from flask import Flask, render_template, request, Response
-import swisseph as swe
-from datetime import datetime
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Astrology Lab</title>
+<style>
+  body { background:#cce7ff; color:#111; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:20px; }
+  .wrap{max-width:1100px; margin:0 auto}
+  .card{background:#fff; border:1px solid #a9c6ff; border-radius:10px; padding:16px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  label{display:block; margin-bottom:4px; color:#003366}
+  input,select,button{padding:8px 10px; border-radius:8px; border:1px solid #8fb0ff; background:#f7fbff; color:#003366}
+  button{background:#3399ff; color:#fff; border-color:#2673cc; font-weight:600; cursor:pointer}
+  button:hover{background:#2673cc}
+  table{border-collapse:collapse; width:100%; margin-top:12px; background:#fff}
+  th,td{border:1px solid #c3d6ff; padding:8px; text-align:center}
+  th{background:#cfe3ff}
+  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:end}
+  .muted{color:#5577aa}
+  .err{color:#b30000}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h2>City search (GeoNames)</h2>
+    <form method="GET" action="/" class="row">
+      <div>
+        <label>Find city</label>
+        <input name="city" value="{{ form.city_q or '' }}" placeholder="e.g., Fort Knox" />
+      </div>
+      <div><button type="submit">Search</button></div>
+    </form>
+    {% if city_error %}<p class="err">{{ city_error }}</p>{% endif %}
+    {% if city_results %}
+      <p class="muted">Select to prefill latitude, longitude, and timezone.</p>
+      <table>
+        <tr><th>City</th><th>Region</th><th>Country</th><th>Lat</th><th>Lon</th><th></th></tr>
+        {% for c in city_results %}
+        <tr>
+          <td>{{ c.name }}</td><td>{{ c.admin }}</td><td>{{ c.country }}</td>
+          <td>{{ c.lat }}</td><td>{{ c.lng }}</td>
+          <td>
+            <form method="POST" action="/">
+              <input type="hidden" name="select_city" value="1"/>
+              <input type="hidden" name="lat" value="{{ c.lat }}"/>
+              <input type="hidden" name="lng" value="{{ c.lng }}"/>
+              <button type="submit">Use</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+  </div>
 
-app = Flask(__name__)
+  <div class="card">
+    <h2>Chart setup</h2>
+    <form method="POST" action="/" class="row">
+      <div>
+        <label>Date (YYYY-MM-DD)</label>
+        <input name="date" value="{{ (form and form.date) or '1962-07-02' }}" />
+      </div>
+      <div>
+        <label>Time</label>
+        <select name="hour">
+          {% for h in range(1,13) %}<option value="{{h}}" {% if form and form.hour|int==h %}selected{% endif %}>{{h}}</option>{% endfor %}
+        </select> :
+        <select name="minute">
+          {% for m in range(0,60,5) %}<option value="{{m}}" {% if form and form.minute|int==m %}selected{% endif %}>{{"%02d"|format(m)}}</option>{% endfor %}
+        </select>
+        <select name="ampm">
+          <option {% if not form or form.ampm=='AM' %}selected{% endif %}>AM</option>
+          <option {% if form and form.ampm=='PM' %}selected{% endif %}>PM</option>
+        </select>
+      </div>
+      <div>
+        <label>Latitude (°)</label>
+        <input name="lat" value="{{ (form and form.lat) or '37.90' }}" />
+      </div>
+      <div>
+        <label>Longitude (°; West negative)</label>
+        <input name="lon" value="{{ (form and form.lon) or '-85.95' }}" />
+      </div>
+      <div>
+        <label>Zodiac</label>
+        <select name="zodiac">
+          <option value="tropical" {% if not form or form.zodiac=='tropical' %}selected{% endif %}>Tropical</option>
+          <option value="sidereal" {% if form and form.zodiac=='sidereal' %}selected{% endif %}>Sidereal (Fagan/Allen)</option>
+        </select>
+      </div>
+      <div>
+        <label>House system</label>
+        <select name="house_system">
+          <option value="EQUAL_ASC_CUSP" {% if not form or form.house_system=='EQUAL_ASC_CUSP' %}selected{% endif %}>Equal — Asc on cusp</option>
+          <option value="EQUAL_ASC_MID"  {% if form and form.house_system=='EQUAL_ASC_MID' %}selected{% endif %}>Equal — Asc in middle</option>
+          <option value="PLACIDUS"       {% if form and form.house_system=='PLACIDUS' %}selected{% endif %}>Placidus</option>
+        </select>
+      </div>
+      <div><button type="submit">Compute</button></div>
+    </form>
 
-@app.get("/healthz")
-def healthz():
-    return "ok", 200
+    {% if page_error %}<p class="err"><b>Error:</b> {{ page_error }}</p>{% endif %}
 
-# ---------- Aspect set (angle°, default orb°, line color) ----------
-ASPECTS = [
-    {"name": "Conjunction",   "angle": 0.00,   "orb": 12.00, "color": "#2563eb"},
-    {"name": "Semi-Sextile",  "angle": 30.00,  "orb": 10.00, "color": "#2563eb"},
-    {"name": "Semi-Square",   "angle": 45.00,  "orb": 3.13,  "color": "#ef4444"},
-    {"name": "Septile",       "angle": 51.26,  "orb": 3.13,  "color": "#8b5cf6"},
-    {"name": "Sextile",       "angle": 60.00,  "orb": 5.21,  "color": "#2563eb"},
-    {"name": "Quintile",      "angle": 72.00,  "orb": 6.38,  "color": "#22c55e"},
-    {"name": "Square",        "angle": 90.00,  "orb": 7.00,  "color": "#ef4444"},
-    {"name": "Bi-Septile",    "angle": 102.51, "orb": 5.50,  "color": "#8b5cf6"},
-    {"name": "Trine",         "angle": 120.00, "orb": 10.30, "color": "#2563eb"},
-    {"name": "Sesqui-Square", "angle": 135.00, "orb": 4.30,  "color": "#ef4444"},
-    {"name": "Bi-Quintile",   "angle": 144.00, "orb": 4.30,  "color": "#22c55e"},
-    {"name": "Tri-Septile",   "angle": 154.17, "orb": 5.46,  "color": "#8b5cf6"},
-    {"name": "Opposition",    "angle": 180.00, "orb": 12.00, "color": "#ef4444"},
-]
+    {% if results %}
+      <h3>Positions — {{ (form.zodiac=='sidereal') and 'Sidereal (F/A)' or 'Tropical' }}</h3>
+      <table>
+        <tr><th>Body</th><th>Longitude (°)</th><th>Sign</th></tr>
+        {% for r in results %}
+          {% if form.zodiac=='sidereal' %}
+            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.sid) }}</td><td>{{ r.sid_sign }}</td></tr>
+          {% else %}
+            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.trop) }}</td><td>{{ r.trop_sign }}</td></tr>
+          {% endif %}
+        {% endfor %}
+      </table>
+    {% endif %}
 
-PLANETS = [
-    (swe.SUN, "Sun"), (swe.MOON, "Moon"), (swe.MERCURY, "Mercury"),
-    (swe.VENUS, "Venus"), (swe.MARS, "Mars"), (swe.JUPITER, "Jupiter"),
-    (swe.SATURN, "Saturn"), (swe.URANUS, "Uranus"), (swe.NEPTUNE, "Neptune"),
-    (swe.PLUTO, "Pluto"),
-]
+    {% if houses %}
+      <h3>Houses — {{ form.house_system.replace('_',' ') }}</h3>
+      <table>
+        <tr><th>#</th><th>Cusp (°)</th><th>Sign</th></tr>
+        {% for c in houses.cusps %}
+          <tr><td>{{ loop.index }}</td><td>{{ '%.2f'|format(c) }}</td><td>{{ (c % 360) // 30 | int }}</td></tr>
+        {% endfor %}
+      </table>
+      <p class="muted">Asc {{ '%.2f'|format(houses.asc) }}° • MC {{ '%.2f'|format(houses.mc) }}°</p>
+    {% endif %}
+  </div>
 
-# Add lunar nodes (True Node; South Node opposite)
-INCLUDE_NODES = True
+  {% if results %}
+  <div class="card">
+    <h2>Chart Wheel</h2>
+    <img src="/chart.svg" alt="chart wheel" width="720" height="720" />
+  </div>
+  {% endif %}
 
-SIGNS = ["Aries","Taurus","Gemini","Cancer","Leo","Virgo",
-         "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"]
-
-PLANET_GLYPHS = {
-    "Sun":"☉","Moon":"☽","Mercury":"☿","Venus":"♀","Mars":"♂",
-    "Jupiter":"♃","Saturn":"♄","Uranus":"♅","Neptune":"♆","Pluto":"♇",
-    "North Node":"☊","South Node":"☋"
-}
-SIGN_GLYPHS = ["♈︎","♉︎","♊︎","♋︎","♌︎","♍︎","♎︎","♏︎","♐︎","♑︎","♒︎","♓︎"]
-
-# keep last computed chart for the /chart.svg endpoint
-LAST = {
-    "names": None,     # list[str]
-    "longs": None,     # list[float] — chosen zodiac (tropical or sidereal)
-    "house_cusps": None,  # list[float] 12 cusps
-    "asc": None, "mc": None,
-    "title": "",
-}
-
-def norm(d): return d % 360.0
-def sign_of(d): return SIGNS[int((d % 360.0)//30)]
-
-def parse_local_time(date_str, hour, minute, ampm):
-    h = int(hour)
-    m = int(minute)
-    ampm = ampm.upper()
-    if ampm == "PM" and h != 12: h += 12
-    if ampm == "AM" and h == 12: h = 0
-    # Julian Day in UT — we treat input as UT to keep UI simple (you can add tz later)
-    y,mn,dy = map(int, date_str.split("-"))
-    jd = swe.julday(y, mn, dy, h + m/60.0)
-    return jd, (y,mn,dy,h,m)
-
-def compute_positions(jd, zodiac, lat, lon, house_mode):
-    """
-    zodiac: 'tropical' or 'sidereal' (Fagan/Allen)
-    house_mode:
-      'EQUAL_ASC_CUSP'  -> Equal with Asc on cusp 1 (Swiss 'E')
-      'EQUAL_ASC_MID'   -> Equal with Asc in the middle of 1st
-      'PLACIDUS'        -> Swiss 'P'
-    """
-    # Tropical longitudes
-    trop = {}
-    for code, name in PLANETS:
-        vals, _ = swe.calc_ut(jd, code)
-        trop[name] = norm(vals[0])
-
-    # Nodes (true)
-    if INCLUDE_NODES:
-        nn_vals, _ = swe.calc_ut(jd, swe.TRUE_NODE)
-        nn = norm(nn_vals[0])
-        sn = norm(nn + 180.0)
-        trop["North Node"] = nn
-        trop["South Node"] = sn
-
-    # Sidereal ayanamsa (Fagan/Bradley)
-    swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
-    ayan = swe.get_ayanamsa_ut(jd)
-
-    rows = []
-    for name, lon_t in trop.items():
-        lon_s = norm(lon_t - ayan)
-        rows.append({
-            "name": name,
-            "trop": lon_t, "trop_sign": sign_of(lon_t),
-            "sid": lon_s,  "sid_sign": sign_of(lon_s),
-        })
-
-    # Houses
-    if house_mode == "PLACIDUS":
-        cusps, ascmc = swe.houses(jd, lat, lon, b'P')
-        cusps = [norm(c) for c in cusps]
-        asc, mc = norm(ascmc[0]), norm(ascmc[1])
-    else:
-        cusps_E, ascmc = swe.houses(jd, lat, lon, b'E')  # equal with Asc on cusp (Swiss default)
-        asc, mc = norm(ascmc[0]), norm(ascmc[1])
-        if house_mode == "EQUAL_ASC_CUSP":
-            cusps = [norm(c) for c in cusps_E]
-        else:
-            # Equal with Asc at middle => cusps every 30°, centered so that Asc is 15° into house 1
-            base = norm(asc - 15.0)
-            cusps = [norm(base + i*30.0) for i in range(12)]
-
-    # Choose which zodiac to drive downstream (positions & SVG)
-    if zodiac == "sidereal":
-        chosen_longs = [r["sid"] for r in rows]
-        title = "Sidereal (Fagan/Allen)"
-    else:
-        chosen_longs = [r["trop"] for r in rows]
-        title = "Tropical"
-
-    names = [r["name"] for r in rows]
-    return rows, names, chosen_longs, cusps, asc, mc, ayan, title
-
-def min_sep(a, b):
-    d = abs((a - b) % 360.0)
-    return d if d <= 180 else 360 - d
-
-def find_aspects(longs):
-    """Return list of (i,j, angle_hit, color) for planet pairs within orb."""
-    hits = []
-    n = len(longs)
-    for i in range(n):
-        for j in range(i+1, n):
-            sep = min_sep(longs[i], longs[j])
-            for asp in ASPECTS:
-                if abs(sep - asp["angle"]) <= asp["orb"]:
-                    hits.append((i, j, asp["angle"], asp["color"]))
-                    break
-    return hits
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    results = houses = None
-    ayanamsa = None
-    form = {"date":"1962-07-02","hour":"11","minute":"33","ampm":"PM",
-            "lat":"37.90","lon":"-85.95","zodiac":"tropical","house_system":"EQUAL_ASC_CUSP"}
-    if request.method == "POST":
-        form["date"]   = request.form.get("date", form["date"])
-        form["hour"]   = request.form.get("hour", form["hour"])
-        form["minute"] = request.form.get("minute", form["minute"])
-        form["ampm"]   = request.form.get("ampm", form["ampm"])
-        form["lat"]    = request.form.get("lat", form["lat"])
-        form["lon"]    = request.form.get("lon", form["lon"])
-        form["zodiac"] = request.form.get("zodiac", form["zodiac"])
-        form["house_system"] = request.form.get("house_system", form["house_system"])
-
-        try:
-            jd, _ = parse_local_time(form["date"], form["hour"], form["minute"], form["ampm"])
-            lat = float(form["lat"]); lon = float(form["lon"])
-            rows, names, chosen_longs, cusps, asc, mc, ayan, title = compute_positions(
-                jd, form["zodiac"], lat, lon, form["house_system"]
-            )
-            # Save for chart
-            LAST["names"] = names
-            LAST["longs"] = chosen_longs
-            LAST["house_cusps"] = cusps
-            LAST["asc"] = asc; LAST["mc"] = mc
-            LAST["title"] = title
-
-            results = rows
-            houses  = {"cusps": cusps, "asc": asc, "mc": mc}
-            ayanamsa = ayan if form["zodiac"] == "sidereal" else None
-        except Exception as e:
-            return render_template("index.html", page_error=str(e), form=form, aspects=ASPECTS)
-
-    return render_template("index.html", results=results, houses=houses, ayanamsa=ayanamsa,
-                           aspects=ASPECTS, form=form)
-
-@app.get("/chart.svg")
-def chart_svg():
-    """
-    Render an SVG wheel:
-      - Outer zodiac ring with big sign glyphs
-      - House cusps as spokes
-      - Planets/nodes as big glyphs
-      - Aspect lines colored per table
-    """
-    import math
-    names = LAST.get("names") or []
-    longs = LAST.get("longs") or []
-    cusps = LAST.get("house_cusps") or []
-    asc = LAST.get("asc"); mc = LAST.get("mc")
-    title = LAST.get("title","")
-
-    size = 720
-    cx = cy = size//2
-    R_outer = size//2 - 12
-    R_signs = R_outer - 26
-    R_planets = R_outer - 80
-    R_aspects = R_planets  # draw lines at planet radius
-
-    def pol(r, deg):
-        # 0° Aries at left (9 o'clock); increase clockwise
-        a = math.radians(180 - deg)
-        return cx + r*math.cos(a), cy - r*math.sin(a)
-
-    svg = []
-    svg.append(f"<svg xmlns='http://www.w3.org/2000/svg' width='{size}' height='{size}' viewBox='0 0 {size} {size}'>")
-    svg.append("<defs><style>@font-face{font-family:system-ui;src:local('Arial');}</style></defs>")
-    svg.append(f"<rect width='100%' height='100%' fill='#cce7ff'/>")
-    svg.append(f"<text x='{cx}' y='28' text-anchor='middle' font-size='20' fill='#003366'>{title} Chart</text>")
-    svg.append(f"<circle cx='{cx}' cy='{cy}' r='{R_outer}' fill='#fff' stroke='#003366' stroke-width='2'/>")
-
-    # 12 sign slices + glyphs
-    for i in range(12):
-        deg0 = i*30.0
-        x,y = pol(R_outer, deg0)
-        svg.append(f"<line x1='{cx}' y1='{cy}' x2='{x:.1f}' y2='{y:.1f}' stroke='#99b3ff'/>")
-        sx,sy = pol(R_signs, deg0 + 15.0)
-        glyph = SIGN_GLYPHS[i]
-        svg.append(f"<text x='{sx:.1f}' y='{sy:.1f}' text-anchor='middle' dominant-baseline='middle' "
-                   f"font-size='28' fill='#003366'>{glyph}</text>")
-
-    # House cusps
-    if cusps:
-        for i, c in enumerate(cusps, start=1):
-            x,y = pol(R_outer, c)
-            svg.append(f"<line x1='{cx}' y1='{cy}' x2='{x:.1f}' y2='{y:.1f}' stroke='#003366' "
-                       f"stroke-width='{2 if i in (1,4,7,10) else 1}'/>")
-            # house number label slightly inside
-            hx,hy = pol(R_signs-18, c+2)
-            svg.append(f"<text x='{hx:.1f}' y='{hy:.1f}' font-size='14' fill='#003366' "
-                       f"text-anchor='middle' dominant-baseline='middle'>{i}</text>")
-
-    # Planet glyph positions
-    pts = []
-    for nm, lo in zip(names, longs):
-        x,y = pol(R_planets, lo)
-        glyph = PLANET_GLYPHS.get(nm, nm[:1])
-        svg.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='12' fill='#ffffff' stroke='#003366'/>")
-        svg.append(f"<text x='{x:.1f}' y='{y+4:.1f}' text-anchor='middle' dominant-baseline='middle' "
-                   f"font-size='22' fill='#003366'>{glyph}</text>")
-        pts.append((x,y))
-
-    # Aspect lines
-    if longs:
-        hits = find_aspects(longs)
-        for i,j,ang,color in hits:
-            x1,y1 = pts[i]; x2,y2 = pts[j]
-            svg.append(f"<line x1='{x1:.1f}' y1='{y1:.1f}' x2='{x2:.1f}' y2='{y2:.1f}' "
-                       f"stroke='{color}' stroke-width='2' opacity='0.9'/>")
-
-    svg.append("</svg>")
-    return Response("\n".join(svg), mimetype="image/svg+xml")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+  <div class="card">
+    <h2>Aspects (defaults)</h2>
+    <table>
+      <tr><th>Aspect</th><th>Angle (°)</th><th>Orb (°)</th><th>Line Color</th></tr>
+      {% for a in aspects %}
+        <tr>
+          <td>{{ a.name }}</td>
+          <td>{{ '%.2f'|format(a.angle) }}</td>
+          <td>{{ '%.2f'|format(a.orb) }}</td>
+          <td style="color:{{a.color}}">{{ a.color }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+</body>
+</html>
