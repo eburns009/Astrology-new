@@ -1,5 +1,5 @@
-Flask
-gunicorn
-pyswisseph
-requests
+Flask==3.0.3
+gunicorn==23.0.0
+pyswisseph==2.10.3.2
+requests==2.32.3
 python-dotenv
