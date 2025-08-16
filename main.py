@@ -1,154 +1,106 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Astrology Lab</title>
-<style>
-  body { background:#cce7ff; color:#111; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:20px; }
-  .wrap{max-width:1100px; margin:0 auto}
-  .card{background:#fff; border:1px solid #a9c6ff; border-radius:10px; padding:16px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.05)}
-  label{display:block; margin-bottom:4px; color:#003366}
-  input,select,button{padding:8px 10px; border-radius:8px; border:1px solid #8fb0ff; background:#f7fbff; color:#003366}
-  button{background:#3399ff; color:#fff; border-color:#2673cc; font-weight:600; cursor:pointer}
-  button:hover{background:#2673cc}
-  table{border-collapse:collapse; width:100%; margin-top:12px; background:#fff}
-  th,td{border:1px solid #c3d6ff; padding:8px; text-align:center}
-  th{background:#cfe3ff}
-  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:end}
-  .muted{color:#5577aa}
-  .err{color:#b30000}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="card">
-    <h2>City search (GeoNames)</h2>
-    <form method="GET" action="/" class="row">
-      <div>
-        <label>Find city</label>
-        <input name="city" value="{{ form.city_q or '' }}" placeholder="e.g., Fort Knox" />
-      </div>
-      <div><button type="submit">Search</button></div>
-    </form>
-    {% if city_error %}<p class="err">{{ city_error }}</p>{% endif %}
-    {% if city_results %}
-      <p class="muted">Select to prefill latitude, longitude, and timezone.</p>
-      <table>
-        <tr><th>City</th><th>Region</th><th>Country</th><th>Lat</th><th>Lon</th><th></th></tr>
-        {% for c in city_results %}
-        <tr>
-          <td>{{ c.name }}</td><td>{{ c.admin }}</td><td>{{ c.country }}</td>
-          <td>{{ c.lat }}</td><td>{{ c.lng }}</td>
-          <td>
-            <form method="POST" action="/">
-              <input type="hidden" name="select_city" value="1"/>
-              <input type="hidden" name="lat" value="{{ c.lat }}"/>
-              <input type="hidden" name="lng" value="{{ c.lng }}"/>
-              <button type="submit">Use</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-    {% endif %}
-  </div>
+from flask import Flask, render_template, request, Response
+import swisseph as swe
+import requests, os
+from datetime import datetime
 
-  <div class="card">
-    <h2>Chart setup</h2>
-    <form method="POST" action="/" class="row">
-      <div>
-        <label>Date (YYYY-MM-DD)</label>
-        <input name="date" value="{{ (form and form.date) or '1962-07-02' }}" />
-      </div>
-      <div>
-        <label>Time</label>
-        <select name="hour">
-          {% for h in range(1,13) %}<option value="{{h}}" {% if form and form.hour|int==h %}selected{% endif %}>{{h}}</option>{% endfor %}
-        </select> :
-        <select name="minute">
-          {% for m in range(0,60,5) %}<option value="{{m}}" {% if form and form.minute|int==m %}selected{% endif %}>{{"%02d"|format(m)}}</option>{% endfor %}
-        </select>
-        <select name="ampm">
-          <option {% if not form or form.ampm=='AM' %}selected{% endif %}>AM</option>
-          <option {% if form and form.ampm=='PM' %}selected{% endif %}>PM</option>
-        </select>
-      </div>
-      <div>
-        <label>Latitude (°)</label>
-        <input name="lat" value="{{ (form and form.lat) or '37.90' }}" />
-      </div>
-      <div>
-        <label>Longitude (°; West negative)</label>
-        <input name="lon" value="{{ (form and form.lon) or '-85.95' }}" />
-      </div>
-      <div>
-        <label>Zodiac</label>
-        <select name="zodiac">
-          <option value="tropical" {% if not form or form.zodiac=='tropical' %}selected{% endif %}>Tropical</option>
-          <option value="sidereal" {% if form and form.zodiac=='sidereal' %}selected{% endif %}>Sidereal (Fagan/Allen)</option>
-        </select>
-      </div>
-      <div>
-        <label>House system</label>
-        <select name="house_system">
-          <option value="EQUAL_ASC_CUSP" {% if not form or form.house_system=='EQUAL_ASC_CUSP' %}selected{% endif %}>Equal — Asc on cusp</option>
-          <option value="EQUAL_ASC_MID"  {% if form and form.house_system=='EQUAL_ASC_MID' %}selected{% endif %}>Equal — Asc in middle</option>
-          <option value="PLACIDUS"       {% if form and form.house_system=='PLACIDUS' %}selected{% endif %}>Placidus</option>
-        </select>
-      </div>
-      <div><button type="submit">Compute</button></div>
-    </form>
+app = Flask(__name__)
 
-    {% if page_error %}<p class="err"><b>Error:</b> {{ page_error }}</p>{% endif %}
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
 
-    {% if results %}
-      <h3>Positions — {{ (form.zodiac=='sidereal') and 'Sidereal (F/A)' or 'Tropical' }}</h3>
-      <table>
-        <tr><th>Body</th><th>Longitude (°)</th><th>Sign</th></tr>
-        {% for r in results %}
-          {% if form.zodiac=='sidereal' %}
-            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.sid) }}</td><td>{{ r.sid_sign }}</td></tr>
-          {% else %}
-            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.trop) }}</td><td>{{ r.trop_sign }}</td></tr>
-          {% endif %}
-        {% endfor %}
-      </table>
-    {% endif %}
+GEONAMES_USERNAME = os.getenv("GEONAMES_USERNAME", "newastologyemerging")
+GEONAMES_BASE = "http://api.geonames.org"
 
-    {% if houses %}
-      <h3>Houses — {{ form.house_system.replace('_',' ') }}</h3>
-      <table>
-        <tr><th>#</th><th>Cusp (°)</th><th>Sign</th></tr>
-        {% for c in houses.cusps %}
-          <tr><td>{{ loop.index }}</td><td>{{ '%.2f'|format(c) }}</td><td>{{ (c % 360) // 30 | int }}</td></tr>
-        {% endfor %}
-      </table>
-      <p class="muted">Asc {{ '%.2f'|format(houses.asc) }}° • MC {{ '%.2f'|format(houses.mc) }}°</p>
-    {% endif %}
-  </div>
+def geonames_search(q, max_rows=8):
+    r = requests.get(f"{GEONAMES_BASE}/searchJSON",
+                     params={"q": q, "maxRows": max_rows, "username": GEONAMES_USERNAME, "featureClass": "P", "orderby": "relevance"},
+                     timeout=10)
+    data = r.json()
+    if "status" in data:
+        raise RuntimeError(data["status"].get("message", "GeoNames error"))
+    out = []
+    for g in data.get("geonames", []):
+        out.append({"name": g.get("name",""), "admin": g.get("adminName1",""),
+                    "country": g.get("countryName",""), "lat": g.get("lat",""),
+                    "lng": g.get("lng","")})
+    return out
 
-  {% if results %}
-  <div class="card">
-    <h2>Chart Wheel</h2>
-    <img src="/chart.svg" alt="chart wheel" width="720" height="720" />
-  </div>
-  {% endif %}
+SIGNS = ["Aries","Taurus","Gemini","Cancer","Leo","Virgo",
+         "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"]
 
-  <div class="card">
-    <h2>Aspects (defaults)</h2>
-    <table>
-      <tr><th>Aspect</th><th>Angle (°)</th><th>Orb (°)</th><th>Line Color</th></tr>
-      {% for a in aspects %}
-        <tr>
-          <td>{{ a.name }}</td>
-          <td>{{ '%.2f'|format(a.angle) }}</td>
-          <td>{{ '%.2f'|format(a.orb) }}</td>
-          <td style="color:{{a.color}}">{{ a.color }}</td>
-        </tr>
-      {% endfor %}
-    </table>
-  </div>
-</div>
-</body>
-</html>
+PLANETS = [
+    (swe.SUN, "Sun"), (swe.MOON, "Moon"), (swe.MERCURY, "Mercury"),
+    (swe.VENUS, "Venus"), (swe.MARS, "Mars"), (swe.JUPITER, "Jupiter"),
+    (swe.SATURN, "Saturn"), (swe.URANUS, "Uranus"), (swe.NEPTUNE, "Neptune"),
+    (swe.PLUTO, "Pluto")
+]
+
+def norm(d): return d % 360.0
+def sign_of(d): return SIGNS[int((d%360)//30)]
+
+def parse_local_time(date_str, hour, minute, ampm):
+    h = int(hour); m = int(minute); ap = ampm.upper()
+    if ap == "PM" and h != 12: h += 12
+    if ap == "AM" and h == 12: h = 0
+    y,mo,dy = map(int, date_str.split("-"))
+    jd = swe.julday(y, mo, dy, h + m/60.0)  # treat as UT for simplicity
+    return jd
+
+def compute_rows(jd, zodiac):
+    swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
+    ayan = swe.get_ayanamsa_ut(jd)
+    rows = []
+    for code, name in PLANETS:
+        vals, _ = swe.calc_ut(jd, code)
+        lon_t = norm(vals[0])
+        lon_s = norm(lon_t - ayan)
+        rows.append({
+            "name": name,
+            "trop": lon_t, "trop_sign": sign_of(lon_t),
+            "sid": lon_s,  "sid_sign": sign_of(lon_s)
+        })
+    return rows, (ayan if zodiac == "sidereal" else None)
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    form = {"date":"1962-07-02","hour":"11","minute":"33","ampm":"PM",
+            "lat":"37.90","lon":"-85.95","zodiac":"tropical", "city_q":""}
+    results = None
+    city_results = None
+    page_error = None
+    ayanamsa = None
+
+    # City search
+    q = (request.args.get("city") or "").strip()
+    if q:
+        try:
+            city_results = geonames_search(q)
+        except Exception as e:
+            page_error = f"GeoNames: {e}"
+
+    if request.method == "POST":
+        for k in ["date","hour","minute","ampm","lat","lon","zodiac"]:
+            form[k] = request.form.get(k, form[k])
+        try:
+            jd = parse_local_time(form["date"], form["hour"], form["minute"], form["ampm"])
+            results, ayanamsa = compute_rows(jd, form["zodiac"])
+        except Exception as e:
+            page_error = str(e)
+
+    return render_template("index.html",
+                           form=form, results=results, ayanamsa=ayanamsa,
+                           city_results=city_results, page_error=page_error)
+
+@app.get("/chart.svg")
+def chart_svg():
+    # simple placeholder chart (renders even if no results yet)
+    return Response(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'>"
+        "<rect width='100%' height='100%' fill='#cce7ff'/>"
+        "<circle cx='150' cy='150' r='120' fill='white' stroke='#003366' stroke-width='2'/>"
+        "</svg>", mimetype="image/svg+xml"
+    )
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
