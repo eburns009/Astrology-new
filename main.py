@@ -1,18 +1,18 @@
 from __future__ import annotations
-from flask import Flask, request, render_template_string, url_for
+from flask import Flask, request, render_template_string
 from zoneinfo import ZoneInfo
 import datetime as dt
-import os, requests, swisseph as swe
+import os, traceback, requests, swisseph as swe
 
 app = Flask(__name__)
+app.config["PROPAGATE_EXCEPTIONS"] = True
 
 # ---- Config ----
 GEONAMES_USERNAME = os.getenv("GEONAMES_USERNAME", "newastologyemerging")
-GEONAMES_BASE = "http://api.geonames.org"  # free tier uses HTTP
 DEFAULT_TZID = "America/New_York"
-DEFAULT_USE_FIXED = True          # mimic Astro.com for 1962
-DEFAULT_FIXED_UTC_OFFSET = -5.0   # EST -> UT = local + 5h
-DEFAULT_FB_EXTRA_OFFSET_DEG = 0.0 # pure Fagan/Bradley
+DEFAULT_USE_FIXED = True          # match Astro.com for 1962
+DEFAULT_FIXED_UTC_OFFSET = -5.0   # EST
+DEFAULT_FB_EXTRA_OFFSET_DEG = 0.0 # pure F/B
 
 PLANETS = [
     ("Sun", swe.SUN), ("Moon", swe.MOON), ("Mercury", swe.MERCURY),
@@ -21,7 +21,6 @@ PLANETS = [
     ("Neptune", swe.NEPTUNE), ("Pluto", swe.PLUTO),
 ]
 
-# ---- Template (use triple single quotes to avoid """ issues) ----
 HTML = '''
 <!doctype html><html><head><meta charset="utf-8">
 <title>Planet Positions — Tropical + Fagan/Bradley</title>
@@ -31,22 +30,20 @@ HTML = '''
  label{min-width:140px} input{padding:.4rem .55rem} button{padding:.5rem .8rem;cursor:pointer}
  table{width:100%;border-collapse:collapse;margin-top:12px}
  th,td{border:1px solid #ddd;padding:.5rem;text-align:left}
- .muted{color:#666}.err{color:#b00020}.card{border:1px solid #ddd;border-radius:8px;padding:10px;margin:10px 0}
+ .muted{color:#666}.err{color:#b00020}
 </style></head><body>
 <h1>Planet Positions</h1>
-<p class="muted">Enter local date/time. We compute <b>Tropical</b> and <b>Sidereal (Fagan/Bradley)</b> side-by-side. Use a fixed UTC offset (no DST) to match Astro.com in 1962.</p>
-
 <form method="POST" class="row" style="align-items:flex-end">
-  <div><label>Date (YYYY-MM-DD)</label><input name="date" value="{{ date or '1962-07-02' }}"></div>
-  <div><label>Time (HH:MM)</label><input name="time" value="{{ time or '23:33' }}"></div>
-  <div><label>Timezone (IANA)</label><input name="tzid" value="{{ tzid or 'America/New_York' }}"></div>
+  <div><label>Date (YYYY-MM-DD)</label><input name="date" value="{{ date }}"></div>
+  <div><label>Time (HH:MM)</label><input name="time" value="{{ time }}"></div>
+  <div><label>Timezone (IANA)</label><input name="tzid" value="{{ tzid }}"></div>
   <div><label><input type="checkbox" name="use_fixed" {% if use_fixed %}checked{% endif %}> Use fixed UTC offset (no DST)</label></div>
-  <div><label>Fixed UTC offset (h)</label><input name="fixed_offset" value="{{ fixed_offset if fixed_offset is not none else '-5' }}"></div>
-  <div><label>FB extra offset (°)</label><input name="fb_offset" value="{{ fb_offset if fb_offset is not none else '0.0' }}"></div>
+  <div><label>Fixed UTC offset (h)</label><input name="fixed_offset" value="{{ fixed_offset }}"></div>
+  <div><label>FB extra offset (°)</label><input name="fb_offset" value="{{ fb_offset }}"></div>
   <button type="submit">Compute</button>
 </form>
 
-{% if page_error %}<p class="err">{{ page_error }}</p>{% endif %}
+{% if page_error %}<p class="err"><b>Error:</b> {{ page_error }}</p>{% endif %}
 
 {% if results %}
 <p class="muted">Local {{ local_str }} ({{ tzid_display }}) → UTC {{ utc_str }} • JD {{ jd }} • Ayanāṃśa (F/B + extra): {{ ayan_used }}°</p>
@@ -60,22 +57,109 @@ HTML = '''
 </body></html>
 '''
 
-# ---- Helpers ----
 def fmt_zodiac(deg: float) -> str:
     signs = ["Aries","Taurus","Gemini","Cancer","Leo","Virgo","Libra","Scorpio",
              "Sagittarius","Capricorn","Aquarius","Pisces"]
     lon = deg % 360.0
-    si = int(lon // 30); x = lon - si*30
-    d = int(x); m_full = (x - d) * 60
-    m = int(m_full); s = int(round((m_full - m) * 60))
-    if s == 60: s=0; m+=1
-    if m == 60: m=0; d+=1
+    si = int(lon // 30)
+    x = lon - si*30
+    d = int(x)
+    m_full = (x - d) * 60
+    m = int(m_full)
+    s = int(round((m_full - m) * 60))
+    if s == 60: s = 0; m += 1
+    if m == 60: m = 0; d += 1
     return f"{d:02d}°{m:02d}'{s:02d}\" {signs[si]}"
+
+def to_jd(local_date: str, local_time: str, tzid: str, use_fixed: bool, fixed_offset_h: float):
+    local_dt = dt.datetime.strptime(f"{local_date} {local_time}", "%Y-%m-%d %H:%M")
+    if use_fixed:
+        tzinfo = dt.timezone(dt.timedelta(hours=float(fixed_offset_h)))
+        tzid_display = f"UTC{float(fixed_offset_h):+.0f} (fixed)"
+    else:
+        tzinfo = ZoneInfo(tzid)
+        tzid_display = tzid
+    local_dt = local_dt.replace(tzinfo=tzinfo)
+    utc_dt = local_dt.astimezone(dt.timezone.utc)
+    h = utc_dt.hour + utc_dt.minute/60 + utc_dt.second/3600
+    jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, h)
+    return jd, local_dt, utc_dt, tzid_display
+
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
 
 @app.route("/", methods=["GET","POST"])
 def index():
-    results = None; page_error = None
-    date_val = time_val = None
+    # defaults shown on first load and used if inputs missing
+    date_val = "1962-07-02"
+    time_val = "23:33"
     tzid = DEFAULT_TZID
     use_fixed = DEFAULT_USE_FIXED
-    fi
+    fixed_offset = DEFAULT_FIXED_UTC_OFFSET
+    fb_extra = DEFAULT_FB_EXTRA_OFFSET_DEG
+
+    page_error = None
+    results = None
+    tzid_display = tzid
+    local_str = utc_str = jd_str = ayan_used = ""
+
+    if request.method == "POST":
+        # read form safely
+        date_val = (request.form.get("date") or date_val).strip()
+        time_val = (request.form.get("time") or time_val).strip()
+        tzid = (request.form.get("tzid") or tzid).strip()
+        use_fixed = (request.form.get("use_fixed") == "on")
+        try:
+            fixed_offset = float((request.form.get("fixed_offset") or fixed_offset))
+        except Exception:
+            fixed_offset = DEFAULT_FIXED_UTC_OFFSET
+        try:
+            fb_extra = float((request.form.get("fb_offset") or fb_extra))
+        except Exception:
+            fb_extra = DEFAULT_FB_EXTRA_OFFSET_DEG
+
+        try:
+            # Local -> UT -> JD
+            jd, local_dt, utc_dt, tzid_display = to_jd(date_val, time_val, tzid, use_fixed, fixed_offset)
+
+            # Ayanamsa (F/B + extra)
+            swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
+            ayan = swe.get_ayanamsa_ut(jd) + fb_extra
+
+            # Planets
+            rows = []
+            for name, code in PLANETS:
+                vals, _flag = swe.calc_ut(jd, code)  # (values, retflag)
+                lon = float(vals[0]) % 360.0
+                sid = (lon - ayan) % 360.0
+                rows.append({
+                    "name": name,
+                    "trop": f"{lon:.6f}",
+                    "trop_sign": fmt_zodiac(lon),
+                    "sid": f"{sid:.6f}",
+                    "sid_sign": fmt_zodiac(sid),
+                })
+
+            results = rows
+            local_str = local_dt.strftime("%Y-%m-%d %H:%M")
+            utc_str = utc_dt.strftime("%Y-%m-%d %H:%M")
+            jd_str = f"{jd:.5f}"
+            ayan_used = f"{ayan:.6f}"
+
+        except Exception as e:
+            # log full traceback to stderr (Render logs)
+            traceback.print_exc()
+            page_error = f"{e.__class__.__name__}: {e}"
+
+    return render_template_string(
+        HTML,
+        date=date_val, time=time_val, tzid=tzid,
+        use_fixed=use_fixed, fixed_offset=fixed_offset, fb_offset=fb_extra,
+        results=results, page_error=page_error,
+        tzid_display=tzid_display, local_str=local_str, utc_str=utc_str,
+        jd=jd_str, ayan_used=ayan_used
+    )
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
