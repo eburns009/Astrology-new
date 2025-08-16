@@ -3,15 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Astrology Lab — Tropical + Fagan/Allen (Fagan/Bradley) Baseline</title>
+  <title>Astrology Lab — Tropical + Fagan/Bradley (index.html • {{ app_version or '' }})</title>
   <style>
     :root { --bg:#0b0c10; --card:#11131a; --muted:#a7b0c0; --text:#e8ecf3; --accent:#7cc7ff; }
     html,body{background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0}
     .wrap{max-width:1100px; margin:24px auto; padding:0 16px}
     h1{margin:.2rem 0 1rem 0; font-size:1.5rem}
-    .nav{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px}
-    .tab{padding:.5rem .75rem; border:1px solid #273246; border-radius:999px; color:var(--muted); text-decoration:none}
-    .tab.active{background:#162032; color:#dff0ff; border-color:#2d3a51}
     .card{background:var(--card); border:1px solid #22283a; border-radius:12px; padding:14px; margin:10px 0}
     .row{display:flex; gap:12px; flex-wrap:wrap; align-items:end}
     label{display:block; color:#c7d0df; margin-bottom:4px}
@@ -22,27 +19,56 @@
     th,td{border:1px solid #2a3042; padding:.5rem; text-align:left}
     .muted{color:var(--muted)}
     .err{color:#ff9aa2}
-    .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:12px}
-    .col-6{grid-column:span 6}
-    .col-12{grid-column:span 12}
-    @media (max-width: 800px){ .col-6{grid-column:span 12} }
-    .wheel{width:320px; height:320px; background:#0f1320; border-radius:50%; border:1px solid #2a3042; display:grid; place-items:center; color:#6ea8ff}
+    .hint{font-size:.9em;color:#93a4ba}
+    ul.results{list-style: none; padding-left: 0}
+    ul.results li{margin:.35rem 0; display:flex; gap:8px; align-items:center}
+    ul.results form{display:inline}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Astrology Lab</h1>
-    <div class="nav">
-      <a class="tab active" href="#calc">Calc</a>
-      <a class="tab" href="#ephem">Ephemeris</a>
-      <a class="tab" href="#transits">Transits/Progressions</a>
-      <a class="tab" href="#wheel">Chart Wheels</a>
-      <a class="tab" href="#stars">Fixed Stars</a>
-      <a class="tab" href="#data">Data</a>
+    <h1>Astrology Lab ({{ app_version or '—' }})</h1>
+
+    <!-- Location search (GeoNames) -->
+    <div class="card">
+      <form method="GET" action="/" class="row">
+        <div>
+          <label>Search city (GeoNames)</label>
+          <input name="city" placeholder="e.g., Fort Knox" />
+        </div>
+        <div>
+          <button class="primary" type="submit">Find</button>
+        </div>
+      </form>
+      {% if city_results is not none %}
+        {% if city_results and city_results[0]._ok %}
+          <p class="hint">Select a result to prefill latitude, longitude, and timezone.</p>
+          <ul class="results">
+          {% for c in city_results %}
+            <li>
+              <span>{{ c.name }}, {{ c.admin }}, {{ c.country }} — ({{ c.lat }}, {{ c.lng }})</span>
+              <form method="POST" action="/select_city">
+                <input type="hidden" name="name" value="{{ c.name }}" />
+                <input type="hidden" name="admin" value="{{ c.admin }}" />
+                <input type="hidden" name="country" value="{{ c.country }}" />
+                <input type="hidden" name="lat" value="{{ c.lat }}" />
+                <input type="hidden" name="lng" value="{{ c.lng }}" />
+                <button type="submit">Use this</button>
+              </form>
+            </li>
+          {% endfor %}
+          </ul>
+        {% else %}
+          <p class="err">{{ city_results[0].label if city_results else 'No results' }}</p>
+        {% endif %}
+      {% endif %}
+      {% if selected_city %}
+        <p class="hint">Selected: {{ selected_city }}</p>
+      {% endif %}
     </div>
 
     <!-- Calc card -->
-    <div id="calc" class="card">
+    <div class="card">
       <form method="POST" action="/" class="row">
         <div>
           <label>Date (YYYY-MM-DD)</label>
@@ -55,6 +81,7 @@
         <div>
           <label>Timezone (IANA)</label>
           <input name="tzid" value="{{ tzid or 'America/New_York' }}" />
+          <div class="hint">If you selected a city above, this may auto-fill from GeoNames.</div>
         </div>
         <div>
           <label><input type="checkbox" name="use_fixed" {% if use_fixed %}checked{% endif %}/> Use fixed UTC offset (no DST)</label>
@@ -66,6 +93,28 @@
         <div>
           <label>FB extra offset (°)</label>
           <input name="fb_offset" value="{{ fb_offset if fb_offset is not none else '0.0' }}" />
+        </div>
+        <div>
+          <label>Center</label>
+          <select name="center">
+            <option value="geo" {% if center == 'geo' %}selected{% endif %}>Geocentric</option>
+            <option value="helio" {% if center == 'helio' %}selected{% endif %}>Heliocentric</option>
+          </select>
+        </div>
+        <div>
+          <label>House System</label>
+          <select name="house_system">
+            <option value="EQUAL" {% if house_system == 'EQUAL' %}selected{% endif %}>Equal (Asc centered)</option>
+            <option value="PLACIDUS" {% if house_system == 'PLACIDUS' %}selected{% endif %}>Placidus</option>
+          </select>
+        </div>
+        <div>
+          <label>Latitude (°)</label>
+          <input name="lat" value="{{ lat or '' }}" placeholder="e.g., 37.900" />
+        </div>
+        <div>
+          <label>Longitude (°; West negative)</label>
+          <input name="lon" value="{{ lon or '' }}" placeholder="e.g., -85.950" />
         </div>
         <div>
           <button class="primary" type="submit">Compute</button>
@@ -97,23 +146,40 @@
         {% endfor %}
       </table>
       {% endif %}
+
+      {% if houses %}
+      <h3>Houses ({{ house_system }})</h3>
+      <p class="muted">Asc {{ houses.asc|float|round(4) }}° • MC {{ houses.mc|float|round(4) }}°</p>
+      <table>
+        <tr>
+          <th>#</th>
+          <th>Cusp (°)</th>
+          <th>Sign</th>
+        </tr>
+        {% for c in houses.cusps %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ '%.6f' % c }}</td>
+          <td>{{ (c % 360) // 30 | int }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
     </div>
 
-    <!-- Ephemeris (placeholder UI) -->
-    <div id="ephem" class="card">
-      <div class="grid">
-        <div class="col-12">
-          <p class="muted"><b>Ephemeris (Fagan/Allen)</b> — choose a date range and step; results will be printable. (Coming next.)</p>
+    <!-- Ephemeris card -->
+    <div class="card">
+      <h3 style="margin-top:0">Ephemeris — Fagan/Allen (Sidereal)</h3>
+      <form method="POST" action="/ephemeris" class="row">
+        <div>
+          <label>Start date (ISO; BCE ok as -0500-01-01)</label>
+          <input name="eph_start" placeholder="-0500-01-01" />
         </div>
-        <div class="col-6">
-          <label>Start date</label>
-          <input name="eph_start" placeholder="-0500-01-01 (BCE supported)" />
-        </div>
-        <div class="col-6">
-          <label>End date</label>
+        <div>
+          <label>End date (ISO)</label>
           <input name="eph_end" placeholder="1962-07-02" />
         </div>
-        <div class="col-6">
+        <div>
           <label>Step</label>
           <select name="eph_step">
             <option>1 day</option>
@@ -121,57 +187,25 @@
             <option>1 hour</option>
           </select>
         </div>
-        <div class="col-6">
+        <div>
           <label>Center</label>
           <select name="eph_center">
             <option value="geo">Geocentric</option>
             <option value="helio">Heliocentric</option>
           </select>
         </div>
-      </div>
-    </div>
-
-    <!-- Transits / Progressions (placeholder UI) -->
-    <div id="transits" class="card">
-      <p class="muted">Transit &amp; Secondary Progression searches (Fagan/Allen sidereal). We’ll add a query builder (e.g., find all times Mars ☐ natal Sun).</p>
-    </div>
-
-    <!-- Chart wheels (placeholder UI) -->
-    <div id="wheel" class="card">
-      <div class="row">
         <div>
-          <label>Wheel Type</label>
-          <select name="wheel_type">
-            <option>Single Wheel</option>
-            <option>Bi-Wheel</option>
-            <option>Tri-Wheel</option>
-          </select>
+          <label>FB extra offset (°)</label>
+          <input name="fb_offset" value="0.0" />
         </div>
         <div>
-          <label>House System</label>
-          <select name="house_system">
-            <option value="EQUAL">Equal (Asc in middle of 1st)</option>
-            <option value="PLACIDUS">Placidus</option>
-          </select>
+          <button class="primary" type="submit">Download CSV</button>
+          <button type="submit" formaction="/ephemeris/preview">Preview/Print</button>
         </div>
-        <div>
-          <label><input type="checkbox" name="clockwise" /> Clockwise houses</label>
-        </div>
-      </div>
-      <div class="wheel">SVG wheel preview (placeholder)</div>
-    </div>
-
-    <!-- Fixed Stars (placeholder UI) -->
-    <div id="stars" class="card">
-      <p class="muted">Fixed star ephemeris aligned to Fagan/Allen (Swiss Ephemeris fixed stars). Search &amp; print coming.</p>
-    </div>
-
-    <!-- Data (placeholder UI) -->
-    <div id="data" class="card">
-      <p class="muted">Chart library &amp; search — store/retrieve natal and event charts, tag, and query by planetary positions.</p>
+      </form>
+      <p class="muted">CSV columns: ISO_UT, AYAN_FB_PLUS, CENTER, Sun..Pluto (sidereal F/A, decimal degrees). Use Preview/Print for paginated HTML.</p>
     </div>
 
   </div>
 </body>
 </html>
-
