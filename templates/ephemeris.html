@@ -1,1 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ephemeris Preview — {{ center|capitalize }} ({{ app_version or '' }})</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:24px}
+    table{border-collapse:collapse; width:100%}
+    th,td{border:1px solid #999; padding:.35rem; font-size:14px}
+    .muted{color:#666}
+  </style>
+</head>
+<body>
+  <h2>Ephemeris Preview — {{ center|capitalize }}</h2>
+  <p class="muted">Ayanāṃśa = Fagan/Bradley (+ any extra offset you entered). Values are sidereal longitudes (°).</p>
+  <table>
+    <tr>
+      <th>ISO (UT)</th>
+      <th>Ayan (°)</th>
+      <th>Center</th>
+      <th>Sun</th><th>Moon</th><th>Mercury</th><th>Venus</th><th>Mars</th>
+      <th>Jupiter</th><th>Saturn</th><th>Uranus</th><th>Neptune</th><th>Pluto</th>
+    </tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.iso }}</td>
+      <td>{{ r.ayan }}</td>
+      <td>{{ r.center }}</td>
+      <td>{{ r.Sun }}</td><td>{{ r.Moon }}</td><td>{{ r.Mercury }}</td><td>{{ r.Venus }}</td><td>{{ r.Mars }}</td>
+      <td>{{ r.Jupiter }}</td><td>{{ r.Saturn }}</td><td>{{ r.Uranus }}</td><td>{{ r.Neptune }}</td><td>{{ r.Pluto }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if truncated %}
+    <p class="muted">Preview truncated for speed. Use CSV download for the full range.</p>
+  {% endif %}
+</body>
+</html>
 
