@@ -5,201 +5,125 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Astrology Lab</title>
   <style>
-    body { background:#e6f2ff; color:#333; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:20px; }
-    h1,h2,h3 { color:#003366; margin:0 0 10px 0; }
-    .wrap{max-width:1100px; margin:0 auto;}
-    .card{background:#fff; border:1px solid #c3d6ff; border-radius:10px; padding:14px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.04)}
-    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:end}
-    label{display:block; margin-bottom:4px; color:#003366}
-    input,select,button{padding:.5rem .6rem; border-radius:10px; border:1px solid #99b3ff; background:#f7fbff; color:#003366}
-    input::placeholder{color:#7aa2e3}
-    button{cursor:pointer; background:#3399ff; color:#fff; border-color:#2673cc; font-weight:600}
-    button:hover{background:#2673cc}
-    table{width:100%; border-collapse:collapse; background:#fff}
-    th,td{border:1px solid #c3d6ff; padding:.45rem; text-align:left}
-    th{background:#cce0ff}
-    .muted{color:#5577aa}
-    .err{color:#b30000}
-    iframe{background:#eef; border:1px solid #99b3ff; border-radius:8px}
+    body { background:#cce7ff; color:#111; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:0; padding:20px; }
+    .card { background:#fff; border-radius:10px; padding:20px; margin:20px auto; max-width:1100px; border:1px solid #a9c6ff; box-shadow:0 1px 2px rgba(0,0,0,.05) }
+    label { display:block; margin-top:10px; color:#003366 }
+    input,select,button { padding:8px 10px; border-radius:8px; border:1px solid #8fb0ff; background:#f7fbff; color:#003366 }
+    input::placeholder { color:#7aa2e3 }
+    button { background:#3399ff; color:#fff; border-color:#2673cc; font-weight:600; cursor:pointer; }
+    button:hover{ background:#2673cc }
+    table { border-collapse:collapse; width:100%; margin-top:16px; background:#fff }
+    th,td{ border:1px solid #c3d6ff; padding:8px; text-align:center }
+    th{ background:#cfe3ff }
+    .row{ display:flex; gap:12px; flex-wrap:wrap; align-items:end }
+    .err{ color:#b30000; margin-top:10px }
+    iframe, img { border:1px solid #99b3ff; border-radius:8px; background:#e6f2ff }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="card">
     <h1>Astrology Lab</h1>
 
-    <div class="card">
-      <form method="POST" action="/" class="row">
-        <!-- Date/time & timezone -->
-        <div>
-          <label>Date (YYYY-MM-DD)</label>
-          <input name="date" value="{{ date or '1962-07-02' }}" />
-        </div>
-        <div>
-          <label>Time (HH:MM)</label>
-          <input name="time" value="{{ time or '23:33' }}" />
-        </div>
-        <div>
-          <label>Timezone (IANA)</label>
-          <input name="tzid" value="{{ tzid or 'America/New_York' }}" />
-        </div>
-        <div>
-          <label><input type="checkbox" name="use_fixed" {% if use_fixed %}checked{% endif %}> Use fixed UTC offset (no DST)</label>
-          <input name="fixed_offset" value="{{ fixed_offset if fixed_offset is not none else '-5' }}" style="width:5em" />
-        </div>
-
-        <!-- Zodiac & center -->
-        <div>
-          <label>Zodiac</label>
-          <select name="zodiac_mode">
-            <option value="tropical" {% if zodiac_mode == 'tropical' %}selected{% endif %}>Tropical</option>
-            <option value="sidereal_fb" {% if zodiac_mode == 'sidereal_fb' %}selected{% endif %}>Sidereal (Fagan/Bradley)</option>
-          </select>
-        </div>
-        <div>
-          <label>Center</label>
-          <select name="center">
-            <option value="geo" {% if center == 'geo' %}selected{% endif %}>Geocentric</option>
-            <option value="helio" {% if center == 'helio' %}selected{% endif %}>Heliocentric</option>
-          </select>
-        </div>
-
-        <!-- Houses -->
-        <div>
-          <label>House system</label>
-          <select name="house_system">
-            <option value="E" {% if house_system == 'E' %}selected{% endif %}>Equal</option>
-            <option value="P" {% if house_system == 'P' %}selected{% endif %}>Placidus</option>
-          </select>
-        </div>
-        <div>
-          <label>House orientation</label>
-          <select name="houses_orientation">
-            <option value="ccw" {% if houses_orientation != 'cw' %}selected{% endif %}>Counter-Clockwise</option>
-            <option value="cw" {% if houses_orientation == 'cw' %}selected{% endif %}>Clockwise</option>
-          </select>
-          <div class="muted" style="font-size:.9em">Asc/MC shown as true angles.</div>
-        </div>
-
-        <!-- Nodes -->
-        <div>
-          <label><input type="checkbox" name="include_nodes" {% if include_nodes %}checked{% endif %}> Include Lunar Nodes</label>
-          <select name="node_type">
-            <option value="true" {% if node_type == 'true' %}selected{% endif %}>True Node</option>
-            <option value="mean" {% if node_type == 'mean' %}selected{% endif %}>Mean Node</option>
-          </select>
-        </div>
-
-        <!-- Location (optional for houses) -->
-        <div>
-          <label>Latitude (°)</label>
-          <input name="lat" value="{{ lat or '' }}" placeholder="e.g., 37.900" />
-        </div>
-        <div>
-          <label>Longitude (°; West negative)</label>
-          <input name="lon" value="{{ lon or '' }}" placeholder="e.g., -85.950" />
-        </div>
-
-        <!-- Aspects -->
-        <div style="flex-basis:100%"></div>
-        <div>
-          <label>Aspect orb (default, °)</label>
-          <input name="orb_default" value="{{ orb_default or '6' }}" style="width:4.5em" />
-        </div>
-        <div>
-          <label>Orbs (°, conj,sext,sqr,tri,opp)</label>
-          <input name="orb_list" value="{{ orb_list or '' }}" placeholder="e.g. 8,5,6,6,8" style="width:14em" />
-        </div>
-
-        <div>
-          <button type="submit">Compute</button>
-        </div>
-      </form>
-
-      {% if page_error %}
-        <p class="err"><b>Error:</b> {{ page_error }}</p>
-      {% endif %}
-
-      {% if results %}
-        <p class="muted">
-          Local {{ local_str }} ({{ tzid_display }}) → UTC {{ utc_str }} • JD {{ jd }}
-          {% if zodiac_mode == 'sidereal_fb' %} • Ayanāṃśa (F/B): {{ ayan_used }}°{% endif %}
-        </p>
-
-        <!-- Positions table: show only chosen zodiac -->
-        <table>
-          <tr>
-            <th>Body</th>
-            {% if zodiac_mode == 'tropical' %}
-              <th>Longitude (°)</th><th>Sign</th>
-            {% else %}
-              <th>Longitude (°) — Sidereal F/B</th><th>Sign</th>
-            {% endif %}
-          </tr>
-          {% for r in results %}
-          <tr>
-            <td>{{ r.name }}</td>
-            {% if zodiac_mode == 'tropical' %}
-              <td>{{ r.trop }}</td><td>{{ r.trop_sign }}</td>
-            {% else %}
-              <td>{{ r.sid }}</td><td>{{ r.sid_sign }}</td>
-            {% endif %}
-          </tr>
+    <form method="POST" class="row">
+      <div>
+        <label>Date (YYYY-MM-DD)</label>
+        <input name="date" value="{{ (form and form.date) or '1962-07-02' }}">
+      </div>
+      <div>
+        <label>Time</label>
+        <select name="hour">
+          {% for h in range(1,13) %}
+            <option value="{{h}}" {% if form and form.hour|int == h %}selected{% endif %}>{{h}}</option>
           {% endfor %}
-        </table>
-      {% endif %}
-
-      {% if houses %}
-        <h3>Houses ({{ house_system == 'E' and 'Equal' or 'Placidus' }}, {{ houses_orientation == 'cw' and 'Clockwise' or 'Counter-Clockwise' }})</h3>
-        <table>
-          <tr><th>#</th><th>Cusp (°)</th><th>Sign</th></tr>
-          {% set cusps_list = houses.cusps %}
-          {% if houses_orientation == 'cw' %}
-            {% set cusps_list = houses.cusps|reverse %}
-          {% endif %}
-          {% for c in cusps_list %}
-          <tr>
-            <td>
-              {% if houses_orientation == 'cw' %}
-                {{ 13 - loop.index }}
-              {% else %}
-                {{ loop.index }}
-              {% endif %}
-            </td>
-            <td>{{ '%.6f' % c }}</td>
-            <td>{{ (c % 360) // 30 | int }}</td>
-          </tr>
+        </select>
+        :
+        <select name="minute">
+          {% for m in range(0,60,5) %}
+            <option value="{{m}}" {% if form and form.minute|int == m %}selected{% endif %}>{{"%02d"|format(m)}}</option>
           {% endfor %}
-        </table>
-        <p class="muted">Asc {{ houses.asc|float|round(4) }}° • MC {{ houses.mc|float|round(4) }}°</p>
-      {% endif %}
+        </select>
+        <select name="ampm">
+          <option {% if not form or form.ampm=='AM' %}selected{% endif %}>AM</option>
+          <option {% if form and form.ampm=='PM' %}selected{% endif %}>PM</option>
+        </select>
+      </div>
 
-      {% if aspect_grid %}
-        <h3>Aspect grid ({{ zodiac_mode == 'tropical' and 'Tropical' or 'Sidereal (F/B)' }})</h3>
-        <table>
-          <tr>
-            <th></th>
-            {% for p in aspect_grid.names %}
-              <th>{{ p }}</th>
-            {% endfor %}
-          </tr>
-          {% for i in aspect_grid.idx %}
-          <tr>
-            <th>{{ aspect_grid.names[i] }}</th>
-            {% for j in aspect_grid.idx %}
-              <td>{{ aspect_grid.rows[i][j] }}</td>
-            {% endfor %}
-          </tr>
-          {% endfor %}
-        </table>
-        <p class="muted">Aspects: ☌0, ✶60, □90, △120, ☍180 (value shows deviation from exact).</p>
-      {% endif %}
-    </div>
+      <div>
+        <label>Latitude (°)</label>
+        <input name="lat" value="{{ (form and form.lat) or '37.90' }}" placeholder="e.g., 37.90">
+      </div>
+      <div>
+        <label>Longitude (°; West negative)</label>
+        <input name="lon" value="{{ (form and form.lon) or '-85.95' }}" placeholder="e.g., -85.95">
+      </div>
+
+      <div>
+        <label>Zodiac</label>
+        <select name="zodiac">
+          <option value="tropical" {% if not form or form.zodiac=='tropical' %}selected{% endif %}>Tropical</option>
+          <option value="sidereal" {% if form and form.zodiac=='sidereal' %}selected{% endif %}>Sidereal (Fagan/Allen)</option>
+        </select>
+      </div>
+
+      <div>
+        <label>House system</label>
+        <select name="house_system">
+          <option value="EQUAL_ASC_CUSP" {% if not form or form.house_system=='EQUAL_ASC_CUSP' %}selected{% endif %}>Equal — Asc on cusp</option>
+          <option value="EQUAL_ASC_MID"  {% if form and form.house_system=='EQUAL_ASC_MID' %}selected{% endif %}>Equal — Asc in middle</option>
+          <option value="PLACIDUS"       {% if form and form.house_system=='PLACIDUS' %}selected{% endif %}>Placidus</option>
+        </select>
+      </div>
+
+      <div>
+        <button type="submit">Compute</button>
+      </div>
+    </form>
+
+    {% if page_error %}<div class="err"><b>Error:</b> {{ page_error }}</div>{% endif %}
 
     {% if results %}
-    <div class="card">
-      <h3>Chart Wheel</h3>
-      <iframe src="/chart" width="580" height="580"></iframe>
-    </div>
+      <h2>Positions ({{ (form.zodiac=='sidereal') and 'Sidereal (F/A)' or 'Tropical' }})</h2>
+      <table>
+        <tr><th>Body</th><th>Longitude (°)</th><th>Sign</th></tr>
+        {% for r in results %}
+          <tr>
+            {% if form.zodiac=='sidereal' %}
+              <td>{{ r.name }}</td><td>{{ '%.2f'|format(r.sid) }}</td><td>{{ r.sid_sign }}</td>
+            {% else %}
+              <td>{{ r.name }}</td><td>{{ '%.2f'|format(r.trop) }}</td><td>{{ r.trop_sign }}</td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </table>
+
+      {% if houses %}
+        <h2>Houses ({{ form.house_system.replace('_',' ') }})</h2>
+        <table>
+          <tr><th>#</th><th>Cusp (°)</th><th>Sign</th></tr>
+          {% for c in houses.cusps %}
+            <tr><td>{{ loop.index }}</td><td>{{ '%.2f'|format(c) }}</td><td>{{ (c % 360) // 30 | int }}</td></tr>
+          {% endfor %}
+        </table>
+        <p>Asc {{ '%.2f'|format(houses.asc) }}° • MC {{ '%.2f'|format(houses.mc) }}°</p>
+      {% endif %}
+
+      <h2>Chart Wheel</h2>
+      <img src="/chart.svg" alt="chart wheel" width="720" height="720">
+    {% endif %}
+
+    {% if aspects %}
+      <h2>Aspects (defaults)</h2>
+      <table>
+        <tr><th>Aspect</th><th>Angle (°)</th><th>Orb (°)</th><th>Line Color</th></tr>
+        {% for a in aspects %}
+          <tr>
+            <td>{{ a.name }}</td>
+            <td>{{ '%.2f'|format(a.angle) }}</td>
+            <td>{{ '%.2f'|format(a.orb) }}</td>
+            <td style="color:{{a.color}}">{{ a.color }}</td>
+          </tr>
+        {% endfor %}
+      </table>
     {% endif %}
   </div>
 </body>
