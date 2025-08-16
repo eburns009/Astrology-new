@@ -4,6 +4,10 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
+
 # ---------- Aspect set (angle°, default orb°, line color) ----------
 ASPECTS = [
     {"name": "Conjunction",   "angle": 0.00,   "orb": 12.00, "color": "#2563eb"},
