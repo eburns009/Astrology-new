@@ -4,11 +4,12 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app -b 0.0.0.0:8000 --workers 2 --threads 4 --timeout 120
+    startCommand: gunicorn main:app -b 0.0.0.0:8000 --workers 2 --threads 4 --timeout 120 --graceful-timeout 120 --keep-alive 5
     autoDeploy: true
+    healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      # Optional if you use GeoNames search:
+      # Uncomment to enable GeoNames lookups in the UI
       # - key: GEONAMES_USERNAME
       #   value: newastologyemerging
