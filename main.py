@@ -4,7 +4,7 @@ import swisseph as swe
 
 app = Flask(__name__)
 
-# ---------- Health check ----------
+# ---------- Health check for Render ----------
 @app.get("/healthz")
 def healthz():
     return "ok", 200
@@ -23,15 +23,18 @@ def geonames_search(q, max_rows=8):
         msg = data["status"].get("message", "GeoNames error")
         code = data["status"].get("value", "")
         raise RuntimeError(f"{msg} (status {code})")
-    return [{
-        "name": g.get("name",""),
-        "admin": g.get("adminName1",""),
-        "country": g.get("countryName",""),
-        "lat": g.get("lat",""),
-        "lng": g.get("lng","")
-    } for g in data.get("geonames", [])]
+    out = []
+    for g in data.get("geonames", []):
+        out.append({
+            "name": g.get("name",""),
+            "admin": g.get("adminName1",""),
+            "country": g.get("countryName",""),
+            "lat": g.get("lat",""),
+            "lng": g.get("lng",""),
+        })
+    return out
 
-# ---------- Astrology data ----------
+# ---------- Astrology constants ----------
 SIGNS = ["Aries","Taurus","Gemini","Cancer","Leo","Virgo",
          "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"]
 
@@ -65,7 +68,7 @@ ASPECTS = [
     {"name":"Opposition","angle":180.00,"orb":12.00,"color":"#ef4444"},
 ]
 
-# Shared state for SVG chart
+# Scratch for SVG chart
 LAST = {"names":None,"longs":None,"cusps":None,"asc":None,"mc":None,"title":""}
 
 # ---------- Helpers ----------
@@ -73,63 +76,63 @@ def norm(d): return d % 360.0
 def sign_of(d): return SIGNS[int((d%360)//30)]
 
 def parse_time(date_str, hour, minute, ampm):
-    h = int(hour); m = int(minute)
-    ap = (ampm or "").upper()
+    h = int(hour); m = int(minute); ap = (ampm or "").upper()
     if ap == "PM" and h != 12: h += 12
     if ap == "AM" and h == 12: h = 0
     y,mo,dy = map(int, date_str.split("-"))
-    # treat entered time as UT (simple; timezone/DST can be added later)
-    return swe.julday(y, mo, dy, h + m/60.0)
+    return swe.julday(y, mo, dy, h + m/60.0)  # treat entered time as UT (simple)
 
-def compute(jd, zodiac, lat, lon, house_mode):
-    # Tropical positions
+def compute_all(jd, fb_extra_deg, lat, lon, house_mode, node_type):
+    """
+    Returns rows with Tropical and Sidereal(F/B + extra) side-by-side,
+    plus houses (Equal/Placidus).
+    """
+    # tropical
     trop = {}
     for code, name in PLANETS:
         vals, _ = swe.calc_ut(jd, code)
         trop[name] = norm(vals[0])
 
-    # Nodes (True Node; South opposite)
-    vals, _ = swe.calc_ut(jd, swe.TRUE_NODE)
-    nn = norm(vals[0])
+    # nodes
+    node_flag = swe.TRUE_NODE if node_type == "true" else swe.MEAN_NODE
+    nvals, _ = swe.calc_ut(jd, node_flag)
+    nn = norm(nvals[0])
     trop["North Node"] = nn
     trop["South Node"] = norm(nn + 180.0)
 
-    # Sidereal: Fagan/Allen
+    # sidereal Fagan/Bradley (+ optional extra offset)
     swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
-    ayan = swe.get_ayanamsa_ut(jd)
+    ayan = swe.get_ayanamsa_ut(jd) + float(fb_extra_deg or 0.0)
 
     rows = []
-    for name, lt in trop.items():
-        ls = norm(lt - ayan)
+    for name, tlon in trop.items():
+        slon = norm(tlon - ayan)
         rows.append({
             "name": name,
-            "trop": lt, "trop_sign": sign_of(lt),
-            "sid": ls,  "sid_sign": sign_of(ls),
+            "trop": tlon, "trop_sign": sign_of(tlon),
+            "sid": slon,  "sid_sign": sign_of(slon),
         })
 
-    # Houses
+    # houses
     if house_mode == "PLACIDUS":
         cusps, ascmc = swe.houses(jd, lat, lon, b'P')
         cusps = [norm(c) for c in cusps]
         asc, mc = norm(ascmc[0]), norm(ascmc[1])
     elif house_mode == "EQUAL_ASC_MID":
-        cuspsE, ascmc = swe.houses(jd, lat, lon, b'E')  # equal, Asc on cusp
+        cuspsE, ascmc = swe.houses(jd, lat, lon, b'E')
         asc, mc = norm(ascmc[0]), norm(ascmc[1])
         base = norm(asc - 15.0)
-        cusps = [norm(base + 30.0*i) for i in range(12)]
-    else:  # "EQUAL_ASC_CUSP"
+        cusps = [norm(base + i*30.0) for i in range(12)]
+    else:  # EQUAL_ASC_CUSP
         cusps, ascmc = swe.houses(jd, lat, lon, b'E')
         cusps = [norm(c) for c in cusps]
         asc, mc = norm(ascmc[0]), norm(ascmc[1])
 
     names = [r["name"] for r in rows]
-    chosen = [r["sid"] for r in rows] if zodiac == "sidereal" else [r["trop"] for r in rows]
-    title = "Sidereal (F/A)" if zodiac == "sidereal" else "Tropical"
-    return rows, names, chosen, cusps, asc, mc, (ayan if zodiac=="sidereal" else None), title
-
-def within_orb(sep, angle, orb):
-    d = abs(sep - angle)
-    return d <= orb
+    # Use sidereal as the chart ring by default (can be changed)
+    ring = [r["sid"] for r in rows]
+    LAST.update({"names":names,"longs":ring,"cusps":cusps,"asc":asc,"mc":mc,"title":"Sidereal (F/A)"})
+    return rows, cusps, asc, mc, ayan
 
 def aspect_hits(longs):
     hits = []
@@ -139,22 +142,28 @@ def aspect_hits(longs):
             sep = abs((longs[i] - longs[j]) % 360.0)
             if sep > 180: sep = 360 - sep
             for a in ASPECTS:
-                if within_orb(sep, a["angle"], a["orb"]):
-                    hits.append((i, j, a["color"]))
+                if abs(sep - a["angle"]) <= a["orb"]:
+                    hits.append((i,j,a["color"]))
                     break
     return hits
 
 # ---------- Routes ----------
 @app.route("/", methods=["GET","POST"])
 def index():
-    form = {"date":"1962-07-02","hour":"11","minute":"33","ampm":"PM",
-            "lat":"37.90","lon":"-85.95","zodiac":"tropical","house_system":"EQUAL_ASC_CUSP"}
-    results = houses = None
-    ayanamsa = None
-    city_results = None
+    form = {
+        "date":"1962-07-02","hour":"11","minute":"33","ampm":"PM",
+        "lat":"37.90","lon":"-85.95",
+        "house_system":"EQUAL_ASC_CUSP",
+        "fb_offset":"0.0000",
+        "node_type":"true"  # true | mean
+    }
     page_error = None
+    city_results = None
+    results = None
+    houses = None
+    ayanamsa = None
 
-    # City search via GET ?city=...
+    # GeoNames search via GET
     q = (request.args.get("city") or "").strip()
     if q:
         try:
@@ -163,22 +172,19 @@ def index():
             page_error = f"GeoNames: {e}"
 
     if request.method == "POST":
-        # City select button fills lat/lon
+        # City selection prefills lat/lon
         if request.form.get("select_city") == "1":
             form["lat"] = request.form.get("lat", form["lat"])
             form["lon"] = request.form.get("lng", form["lon"])
         else:
-            for k in ["date","hour","minute","ampm","lat","lon","zodiac","house_system"]:
+            for k in ["date","hour","minute","ampm","lat","lon","house_system","fb_offset","node_type"]:
                 form[k] = request.form.get(k, form[k])
             try:
                 jd = parse_time(form["date"], form["hour"], form["minute"], form["ampm"])
-                lat = float(form["lat"]); lon = float(form["lon"])
-                rows, names, longs, cusps, asc, mc, ayan, title = compute(
-                    jd, form["zodiac"], lat, lon, form["house_system"]
+                rows, cusps, asc, mc, ayan = compute_all(
+                    jd, form["fb_offset"], float(form["lat"]), float(form["lon"]),
+                    form["house_system"], form["node_type"]
                 )
-                # Save for chart
-                LAST["names"], LAST["longs"] = names, longs
-                LAST["cusps"], LAST["asc"], LAST["mc"], LAST["title"] = cusps, asc, mc, title
                 results = rows
                 houses = {"cusps":cusps, "asc":asc, "mc":mc}
                 ayanamsa = ayan
@@ -204,7 +210,7 @@ def chart_svg():
     R_planets = R_outer - 80
 
     def pol(r, deg):
-        a = math.radians(180 - deg)  # 0 Aries at left, clockwise
+        a = math.radians(180 - deg)  # 0 Aries left; clockwise increases
         return cx + r*math.cos(a), cy - r*math.sin(a)
 
     svg = []
@@ -213,16 +219,16 @@ def chart_svg():
     svg.append(f"<text x='{cx}' y='28' text-anchor='middle' font-size='20' fill='#003366'>{title} Chart</text>")
     svg.append(f"<circle cx='{cx}' cy='{cy}' r='{R_outer}' fill='#fff' stroke='#003366' stroke-width='2'/>")
 
-    # Zodiac spokes + glyphs
+    # zodiac ring + glyphs
     for i in range(12):
-        d0 = i * 30.0
+        d0 = i*30.0
         x,y = pol(R_outer, d0)
         svg.append(f"<line x1='{cx}' y1='{cy}' x2='{x:.1f}' y2='{y:.1f}' stroke='#99b3ff'/>")
         sx,sy = pol(R_signs, d0+15.0)
         svg.append(f"<text x='{sx:.1f}' y='{sy:.1f}' text-anchor='middle' dominant-baseline='middle' "
                    f"font-size='28' fill='#003366'>{SIGN_GLYPHS[i]}</text>")
 
-    # House cusps
+    # houses
     for i, c in enumerate(cusps, start=1):
         x,y = pol(R_outer, c)
         svg.append(f"<line x1='{cx}' y1='{cy}' x2='{x:.1f}' y2='{y:.1f}' "
@@ -231,7 +237,7 @@ def chart_svg():
         svg.append(f"<text x='{hx:.1f}' y='{hy:.1f}' font-size='14' fill='#003366' "
                    f"text-anchor='middle' dominant-baseline='middle'>{i}</text>")
 
-    # Planet glyphs
+    # planets (sidereal ring saved in LAST)
     pts = []
     for nm, lo in zip(names, longs):
         x,y = pol(R_planets, lo)
@@ -240,7 +246,7 @@ def chart_svg():
                    f"font-size='22' fill='#003366'>{PLANET_GLYPHS.get(nm, nm[:1])}</text>")
         pts.append((x,y))
 
-    # Aspect lines
+    # aspect lines
     if longs:
         for i,j,color in aspect_hits(longs):
             x1,y1 = pts[i]; x2,y2 = pts[j]
