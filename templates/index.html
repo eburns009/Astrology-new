@@ -3,40 +3,38 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Astrology Lab</title>
+<title>Astrology — Tropical & Fagan/Allen</title>
 <style>
-  body { background:#cce7ff; color:#111; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:20px; }
+  body{background:#cce7ff; color:#0b2a58; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:16px}
   .wrap{max-width:1100px; margin:0 auto}
   .card{background:#fff; border:1px solid #a9c6ff; border-radius:10px; padding:16px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.05)}
-  label{display:block; margin-bottom:4px; color:#003366}
-  input,select,button{padding:8px 10px; border-radius:8px; border:1px solid #8fb0ff; background:#f7fbff; color:#003366}
-  button{background:#3399ff; color:#fff; border-color:#2673cc; font-weight:600; cursor:pointer}
+  h1,h2,h3{margin:.2rem 0 .8rem}
+  label{display:block; margin-bottom:4px}
+  input,select,button{padding:8px 10px; border-radius:8px; border:1px solid #8fb0ff; background:#f7fbff; color:#0b2a58}
+  button{background:#3399ff; color:#fff; border-color:#2673cc; cursor:pointer; font-weight:600}
   button:hover{background:#2673cc}
   table{border-collapse:collapse; width:100%; margin-top:12px; background:#fff}
   th,td{border:1px solid #c3d6ff; padding:8px; text-align:center}
   th{background:#cfe3ff}
   .row{display:flex; gap:12px; flex-wrap:wrap; align-items:end}
   .muted{color:#5577aa}
-  .err{color:#b30000}
+  .err{color:#c00}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <!-- GeoNames search -->
   <div class="card">
     <h2>City search (GeoNames)</h2>
     <form method="GET" action="/" class="row">
       <div>
         <label>Find city</label>
-        <input name="city" value="" placeholder="e.g., Fort Knox, KY" />
+        <input name="city" placeholder="e.g., Fort Knox, KY" />
       </div>
       <div><button type="submit">Search</button></div>
     </form>
-
     {% if page_error %}<p class="err">{{ page_error }}</p>{% endif %}
     {% if city_results %}
-      <p class="muted">Select a row to fill latitude/longitude.</p>
       <table>
         <tr><th>City</th><th>Region</th><th>Country</th><th>Lat</th><th>Lon</th><th></th></tr>
         {% for c in city_results %}
@@ -45,9 +43,9 @@
             <td>{{ c.lat }}</td><td>{{ c.lng }}</td>
             <td>
               <form method="POST" action="/">
-                <input type="hidden" name="select_city" value="1" />
-                <input type="hidden" name="lat" value="{{ c.lat }}" />
-                <input type="hidden" name="lng" value="{{ c.lng }}" />
+                <input type="hidden" name="select_city" value="1">
+                <input type="hidden" name="lat" value="{{ c.lat }}">
+                <input type="hidden" name="lng" value="{{ c.lng }}">
                 <button type="submit">Use</button>
               </form>
             </td>
@@ -57,13 +55,12 @@
     {% endif %}
   </div>
 
-  <!-- Calculator -->
   <div class="card">
     <h2>Chart setup</h2>
     <form method="POST" action="/" class="row">
       <div>
         <label>Date (YYYY-MM-DD)</label>
-        <input name="date" value="{{ (form and form.date) or '1962-07-02' }}" />
+        <input name="date" value="{{ (form and form.date) or '1962-07-02' }}">
       </div>
       <div>
         <label>Time</label>
@@ -76,18 +73,11 @@
       </div>
       <div>
         <label>Latitude (°)</label>
-        <input name="lat" value="{{ (form and form.lat) or '37.90' }}" />
+        <input name="lat" value="{{ (form and form.lat) or '37.90' }}">
       </div>
       <div>
         <label>Longitude (°; West negative)</label>
-        <input name="lon" value="{{ (form and form.lon) or '-85.95' }}" />
-      </div>
-      <div>
-        <label>Zodiac</label>
-        <select name="zodiac">
-          <option value="tropical" {% if not form or form.zodiac=='tropical' %}selected{% endif %}>Tropical</option>
-          <option value="sidereal" {% if form and form.zodiac=='sidereal' %}selected{% endif %}>Sidereal (Fagan/Allen)</option>
-        </select>
+        <input name="lon" value="{{ (form and form.lon) or '-85.95' }}">
       </div>
       <div>
         <label>House system</label>
@@ -97,19 +87,36 @@
           <option value="PLACIDUS"       {% if form and form.house_system=='PLACIDUS' %}selected{% endif %}>Placidus</option>
         </select>
       </div>
+      <div>
+        <label>FB extra offset (°)</label>
+        <input name="fb_offset" value="{{ (form and form.fb_offset) or '0.0000' }}">
+      </div>
+      <div>
+        <label>Node</label>
+        <select name="node_type">
+          <option value="true" {% if not form or form.node_type=='true' %}selected{% endif %}>True</option>
+          <option value="mean" {% if form and form.node_type=='mean' %}selected{% endif %}>Mean</option>
+        </select>
+      </div>
       <div><button type="submit">Compute</button></div>
     </form>
 
     {% if results %}
-      <h3>Positions — {{ (form.zodiac=='sidereal') and 'Sidereal (F/A)' or 'Tropical' }}</h3>
+      <h3>Positions — Tropical vs Sidereal (Fagan/Allen{% if ayanamsa is not none %}, ayanāṃśa {{ '%.6f'|format(ayanamsa) }}°{% endif %}{% if form.fb_offset and form.fb_offset|float != 0.0 %} + {{ form.fb_offset }}°{% endif %})</h3>
       <table>
-        <tr><th>Body</th><th>Longitude (°)</th><th>Sign</th></tr>
+        <tr>
+          <th>Body</th>
+          <th>Tropical (°)</th><th>Tropical Sign</th>
+          <th>Sidereal F/B (°)</th><th>Sidereal Sign</th>
+        </tr>
         {% for r in results %}
-          {% if form.zodiac=='sidereal' %}
-            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.sid) }}</td><td>{{ r.sid_sign }}</td></tr>
-          {% else %}
-            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.trop) }}</td><td>{{ r.trop_sign }}</td></tr>
-          {% endif %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td>{{ '%.6f'|format(r.trop) }}</td>
+            <td>{{ r.trop_sign }}</td>
+            <td>{{ '%.6f'|format(r.sid) }}</td>
+            <td>{{ r.sid_sign }}</td>
+          </tr>
         {% endfor %}
       </table>
     {% endif %}
@@ -119,17 +126,17 @@
       <table>
         <tr><th>#</th><th>Cusp (°)</th><th>Sign</th></tr>
         {% for c in houses.cusps %}
-          <tr><td>{{ loop.index }}</td><td>{{ '%.2f'|format(c) }}</td><td>{{ (c % 360) // 30 | int }}</td></tr>
+          <tr><td>{{ loop.index }}</td><td>{{ '%.6f'|format(c) }}</td><td>{{ (c%360)//30 | int }}</td></tr>
         {% endfor %}
       </table>
-      <p class="muted">Asc {{ '%.2f'|format(houses.asc) }}° • MC {{ '%.2f'|format(houses.mc) }}°</p>
+      <p class="muted">Asc {{ '%.4f'|format(houses.asc) }}° • MC {{ '%.4f'|format(houses.mc) }}°</p>
     {% endif %}
   </div>
 
   {% if results %}
   <div class="card">
-    <h2>Chart Wheel</h2>
-    <img src="/chart.svg" alt="chart wheel" width="720" height="720" />
+    <h2>Chart Wheel (Sidereal ring)</h2>
+    <img src="/chart.svg" width="720" height="720" alt="chart wheel">
   </div>
   {% endif %}
 
