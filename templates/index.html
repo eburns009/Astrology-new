@@ -1,45 +1,153 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Astrology Lab</title>
-  <style>
-    body{background:#cce7ff;font-family:system-ui;margin:0;padding:20px}
-    .wrap{max-width:1100px; margin:0 auto}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Astrology Lab</title>
+<style>
+  body { background:#cce7ff; color:#111; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; padding:20px; }
+  .wrap{max-width:1100px; margin:0 auto}
+  .card{background:#fff; border:1px solid #a9c6ff; border-radius:10px; padding:16px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  label{display:block; margin-bottom:4px; color:#003366}
+  input,select,button{padding:8px 10px; border-radius:8px; border:1px solid #8fb0ff; background:#f7fbff; color:#003366}
+  button{background:#3399ff; color:#fff; border-color:#2673cc; font-weight:600; cursor:pointer}
+  button:hover{background:#2673cc}
+  table{border-collapse:collapse; width:100%; margin-top:12px; background:#fff}
+  th,td{border:1px solid #c3d6ff; padding:8px; text-align:center}
+  th{background:#cfe3ff}
+  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:end}
+  .muted{color:#5577aa}
+  .err{color:#b30000}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>It runs 🎉</h1>
-    <form method="POST">
-      <label>Date <input name="date" value="{{ (form and form.date) or '1962-07-02' }}"></label>
-      <label>Hour
-        <select name="hour">{% for h in range(1,13) %}<option value="{{h}}" {% if form and form.hour|int==h %}selected{% endif %}>{{h}}</option>{% endfor %}</select>
-      </label>
-      <label>Minute
-        <select name="minute">{% for m in range(0,60,5) %}<option value="{{m}}" {% if form and form.minute|int==m %}selected{% endif %}>{{"%02d"|format(m)}}</option>{% endfor %}</select>
-      </label>
-      <select name="ampm"><option {% if not form or form.ampm=='AM' %}selected{% endif %}>AM</option><option {% if form and form.ampm=='PM' %}selected{% endif %}>PM</option></select>
-      <button type="submit">Compute</button>
+<div class="wrap">
+
+  <!-- GeoNames search -->
+  <div class="card">
+    <h2>City search (GeoNames)</h2>
+    <form method="GET" action="/" class="row">
+      <div>
+        <label>Find city</label>
+        <input name="city" value="" placeholder="e.g., Fort Knox, KY" />
+      </div>
+      <div><button type="submit">Search</button></div>
     </form>
 
-    {% if page_error %}<p style="color:red">{{page_error}}</p>{% endif %}
+    {% if page_error %}<p class="err">{{ page_error }}</p>{% endif %}
+    {% if city_results %}
+      <p class="muted">Select a row to fill latitude/longitude.</p>
+      <table>
+        <tr><th>City</th><th>Region</th><th>Country</th><th>Lat</th><th>Lon</th><th></th></tr>
+        {% for c in city_results %}
+          <tr>
+            <td>{{ c.name }}</td><td>{{ c.admin }}</td><td>{{ c.country }}</td>
+            <td>{{ c.lat }}</td><td>{{ c.lng }}</td>
+            <td>
+              <form method="POST" action="/">
+                <input type="hidden" name="select_city" value="1" />
+                <input type="hidden" name="lat" value="{{ c.lat }}" />
+                <input type="hidden" name="lng" value="{{ c.lng }}" />
+                <button type="submit">Use</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+  </div>
+
+  <!-- Calculator -->
+  <div class="card">
+    <h2>Chart setup</h2>
+    <form method="POST" action="/" class="row">
+      <div>
+        <label>Date (YYYY-MM-DD)</label>
+        <input name="date" value="{{ (form and form.date) or '1962-07-02' }}" />
+      </div>
+      <div>
+        <label>Time</label>
+        <select name="hour">{% for h in range(1,13) %}<option value="{{h}}" {% if form and form.hour|int==h %}selected{% endif %}>{{h}}</option>{% endfor %}</select> :
+        <select name="minute">{% for m in range(0,60,5) %}<option value="{{m}}" {% if form and form.minute|int==m %}selected{% endif %}>{{"%02d"|format(m)}}</option>{% endfor %}</select>
+        <select name="ampm">
+          <option {% if not form or form.ampm=='AM' %}selected{% endif %}>AM</option>
+          <option {% if form and form.ampm=='PM' %}selected{% endif %}>PM</option>
+        </select>
+      </div>
+      <div>
+        <label>Latitude (°)</label>
+        <input name="lat" value="{{ (form and form.lat) or '37.90' }}" />
+      </div>
+      <div>
+        <label>Longitude (°; West negative)</label>
+        <input name="lon" value="{{ (form and form.lon) or '-85.95' }}" />
+      </div>
+      <div>
+        <label>Zodiac</label>
+        <select name="zodiac">
+          <option value="tropical" {% if not form or form.zodiac=='tropical' %}selected{% endif %}>Tropical</option>
+          <option value="sidereal" {% if form and form.zodiac=='sidereal' %}selected{% endif %}>Sidereal (Fagan/Allen)</option>
+        </select>
+      </div>
+      <div>
+        <label>House system</label>
+        <select name="house_system">
+          <option value="EQUAL_ASC_CUSP" {% if not form or form.house_system=='EQUAL_ASC_CUSP' %}selected{% endif %}>Equal — Asc on cusp</option>
+          <option value="EQUAL_ASC_MID"  {% if form and form.house_system=='EQUAL_ASC_MID' %}selected{% endif %}>Equal — Asc in middle</option>
+          <option value="PLACIDUS"       {% if form and form.house_system=='PLACIDUS' %}selected{% endif %}>Placidus</option>
+        </select>
+      </div>
+      <div><button type="submit">Compute</button></div>
+    </form>
+
     {% if results %}
-      <h2>Positions ({{ form.zodiac }})</h2>
-      <table border="1" cellpadding="6">
-        <tr><th>Body</th><th>Longitude</th><th>Sign</th></tr>
+      <h3>Positions — {{ (form.zodiac=='sidereal') and 'Sidereal (F/A)' or 'Tropical' }}</h3>
+      <table>
+        <tr><th>Body</th><th>Longitude (°)</th><th>Sign</th></tr>
         {% for r in results %}
           {% if form.zodiac=='sidereal' %}
-            <tr><td>{{r.name}}</td><td>{{'%.2f'|format(r.sid)}}</td><td>{{r.sid_sign}}</td></tr>
+            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.sid) }}</td><td>{{ r.sid_sign }}</td></tr>
           {% else %}
-            <tr><td>{{r.name}}</td><td>{{'%.2f'|format(r.trop)}}</td><td>{{r.trop_sign}}</td></tr>
+            <tr><td>{{ r.name }}</td><td>{{ '%.2f'|format(r.trop) }}</td><td>{{ r.trop_sign }}</td></tr>
           {% endif %}
         {% endfor %}
       </table>
     {% endif %}
 
-    <h2>Chart</h2>
-    <img src="/chart.svg" width="300" height="300">
+    {% if houses %}
+      <h3>Houses — {{ form.house_system.replace('_',' ') }}</h3>
+      <table>
+        <tr><th>#</th><th>Cusp (°)</th><th>Sign</th></tr>
+        {% for c in houses.cusps %}
+          <tr><td>{{ loop.index }}</td><td>{{ '%.2f'|format(c) }}</td><td>{{ (c % 360) // 30 | int }}</td></tr>
+        {% endfor %}
+      </table>
+      <p class="muted">Asc {{ '%.2f'|format(houses.asc) }}° • MC {{ '%.2f'|format(houses.mc) }}°</p>
+    {% endif %}
   </div>
+
+  {% if results %}
+  <div class="card">
+    <h2>Chart Wheel</h2>
+    <img src="/chart.svg" alt="chart wheel" width="720" height="720" />
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Aspects (defaults)</h2>
+    <table>
+      <tr><th>Aspect</th><th>Angle (°)</th><th>Orb (°)</th><th>Line Color</th></tr>
+      {% for a in aspects %}
+        <tr>
+          <td>{{ a.name }}</td>
+          <td>{{ '%.2f'|format(a.angle) }}</td>
+          <td>{{ '%.2f'|format(a.orb) }}</td>
+          <td style="color:{{a.color}}">{{ a.color }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+</div>
 </body>
 </html>
