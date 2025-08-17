@@ -1,40 +1,90 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ephemeris Preview — {{ center|capitalize }} ({{ app_version or '' }})</title>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:24px}
-    table{border-collapse:collapse; width:100%}
-    th,td{border:1px solid #999; padding:.35rem; font-size:14px}
-    .muted{color:#666}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{ title or "Ephemeris" }}</title>
+<style>
+  :root { --bg:#cce7ff; --card:#fff; --ink:#003366; --line:#c3d6ff; --head:#cfe3ff; }
+  html,body{background:var(--bg); color:#111; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0}
+  .wrap{max-width:1100px; margin:20px auto; padding:0 16px}
+  .card{background:var(--card); border:1px solid #a9c6ff; border-radius:10px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  h1,h2{color:var(--ink); margin:.2rem 0 .6rem}
+  .meta{color:#5577aa; margin-bottom:8px}
+  table{width:100%; border-collapse:collapse; background:#fff; font-variant-numeric: tabular-nums}
+  th,td{border:1px solid var(--line); padding:8px; text-align:right}
+  th:first-child, td:first-child{ text-align:left }
+  thead th{position:sticky; top:0; background:var(--head); z-index:2}
+  .toolbar{display:flex; gap:8px; align-items:center; margin:10px 0 14px}
+  .btn{background:#3399ff; color:#fff; border:1px solid #2673cc; padding:8px 10px; border-radius:8px; text-decoration:none}
+  .btn:hover{background:#2673cc}
+  @media print{
+    .toolbar { display:none }
+    .card{border:none; box-shadow:none}
+    body{background:#fff}
+    thead th{position:static}
+  }
+</style>
 </head>
 <body>
-  <h2>Ephemeris Preview — {{ center|capitalize }}</h2>
-  <p class="muted">Ayanāṃśa = Fagan/Bradley (+ any extra offset you entered). Values are sidereal longitudes (°).</p>
-  <table>
-    <tr>
-      <th>ISO (UT)</th>
-      <th>Ayan (°)</th>
-      <th>Center</th>
-      <th>Sun</th><th>Moon</th><th>Mercury</th><th>Venus</th><th>Mars</th>
-      <th>Jupiter</th><th>Saturn</th><th>Uranus</th><th>Neptune</th><th>Pluto</th>
-    </tr>
-    {% for r in rows %}
-    <tr>
-      <td>{{ r.iso }}</td>
-      <td>{{ r.ayan }}</td>
-      <td>{{ r.center }}</td>
-      <td>{{ r.Sun }}</td><td>{{ r.Moon }}</td><td>{{ r.Mercury }}</td><td>{{ r.Venus }}</td><td>{{ r.Mars }}</td>
-      <td>{{ r.Jupiter }}</td><td>{{ r.Saturn }}</td><td>{{ r.Uranus }}</td><td>{{ r.Neptune }}</td><td>{{ r.Pluto }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% if truncated %}
-    <p class="muted">Preview truncated for speed. Use CSV download for the full range.</p>
-  {% endif %}
+<div class="wrap">
+  <div class="card">
+    <h1>{{ title or "Ephemeris" }}</h1>
+    <div class="meta">
+      Range: <b>{{ meta.start_iso }}</b> → <b>{{ meta.end_iso }}</b> •
+      Step: <b>{{ meta.step_label }}</b> •
+      Center: <b>{{ meta.center }}</b> •
+      Zodiac: <b>{{ meta.zodiac }}</b>
+      {% if meta.ayanamsa is defined and meta.ayanamsa is not none %} • Ayanāṃśa: <b>{{ '%.6f'|format(meta.ayanamsa) }}°</b>{% endif %}
+      {% if meta.fb_offset %} • Extra offset: <b>{{ meta.fb_offset }}°</b>{% endif %}
+    </div>
+
+    <div class="toolbar">
+      {% if meta.download_url %}
+        <a class="btn" href="{{ meta.download_url }}">Download CSV</a>
+      {% endif %}
+      <a class="btn" href="javascript:window.print()">Print</a>
+    </div>
+
+    {% set cols = planets if planets is defined and planets else
+        (rows[0].keys() | list if rows and 'ISO_UT' in rows[0] else []) %}
+    {% if not planets and rows and 'ISO_UT' in rows[0] %}
+      {# Reorder so ISO_UT first, then the rest alphabetically #}
+      {% set _rest = (rows[0].keys() | list) %}
+      {% do _rest.remove('ISO_UT') %}
+      {% set cols = ['ISO_UT'] + (_rest | sort) %}
+    {% endif %}
+
+    {% if rows and cols %}
+    <div style="max-height:70vh; overflow:auto; border:1px solid var(--line); border-radius:8px">
+      <table>
+        <thead>
+          <tr>
+            {% for c in cols %}
+              <th>{{ c }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              {% for c in cols %}
+                {% if c == 'ISO_UT' %}
+                  <td style="white-space:nowrap">{{ r[c] }}</td>
+                {% else %}
+                  {# Show angles with 5 decimals, blank if missing #}
+                  <td>{{ r[c] is not none and ('%.5f'|format(r[c])) or '' }}</td>
+                {% endif %}
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p>No ephemeris rows to display.</p>
+    {% endif %}
+  </div>
+</div>
 </body>
 </html>
-
